@@ -22,6 +22,7 @@ import com.android.inputmethod.latin.define.ProductionFlags;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.TreeSet;
 
 /**
@@ -29,23 +30,22 @@ import java.util.TreeSet;
  * than its limit
  */
 public final class SuggestionResults extends TreeSet<SuggestedWordInfo> {
+    public final Locale mLocale;
     public final ArrayList<SuggestedWordInfo> mRawSuggestions;
     // TODO: Instead of a boolean , we may want to include the context of this suggestion results,
-    // such as {@link NgramContext}.
+    // such as {@link PrevWordsInfo}.
     public final boolean mIsBeginningOfSentence;
-    public final boolean mFirstSuggestionExceedsConfidenceThreshold;
     private final int mCapacity;
 
-    public SuggestionResults(final int capacity, final boolean isBeginningOfSentence,
-            final boolean firstSuggestionExceedsConfidenceThreshold) {
-        this(sSuggestedWordInfoComparator, capacity, isBeginningOfSentence,
-                firstSuggestionExceedsConfidenceThreshold);
+    public SuggestionResults(final Locale locale, final int capacity,
+            final boolean isBeginningOfSentence) {
+        this(locale, sSuggestedWordInfoComparator, capacity, isBeginningOfSentence);
     }
 
-    private SuggestionResults(final Comparator<SuggestedWordInfo> comparator, final int capacity,
-            final boolean isBeginningOfSentence,
-            final boolean firstSuggestionExceedsConfidenceThreshold) {
+    private SuggestionResults(final Locale locale, final Comparator<SuggestedWordInfo> comparator,
+            final int capacity, final boolean isBeginningOfSentence) {
         super(comparator);
+        mLocale = locale;
         mCapacity = capacity;
         if (ProductionFlags.INCLUDE_RAW_SUGGESTIONS) {
             mRawSuggestions = new ArrayList<>();
@@ -53,7 +53,6 @@ public final class SuggestionResults extends TreeSet<SuggestedWordInfo> {
             mRawSuggestions = null;
         }
         mIsBeginningOfSentence = isBeginningOfSentence;
-        mFirstSuggestionExceedsConfidenceThreshold = firstSuggestionExceedsConfidenceThreshold;
     }
 
     @Override
@@ -71,7 +70,8 @@ public final class SuggestionResults extends TreeSet<SuggestedWordInfo> {
         return super.addAll(e);
     }
 
-    static final class SuggestedWordInfoComparator implements Comparator<SuggestedWordInfo> {
+    private static final class SuggestedWordInfoComparator
+            implements Comparator<SuggestedWordInfo> {
         // This comparator ranks the word info with the higher frequency first. That's because
         // that's the order we want our elements in.
         @Override

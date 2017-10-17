@@ -20,7 +20,6 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
     <style name="KeyboardIcons" />
-    <style name="InputView" />
     <!-- Default theme values -->
     <style name="Keyboard">
         <item name="rowHeight">25%p</item>
@@ -105,10 +104,8 @@
     <style
         name="MainKeyboardView"
         parent="KeyboardView" />
-    <!-- Though {@link com.android.inputmethod.keyboard.emoji.EmojiPalettesView} doesn't extend
-         {@link com.android.inputmethod.keyboard.KeyboardView}, some views inside it, for instance
-         delete button, need themed {@link com.android.inputmethod.keyboard.KeyboardView}
-         attributes. -->
+    <!-- Though {@link EmojiPalettesView} doesn't extend {@link KeyboardView}, some views inside it,
+         for instance delete button, need themed {@link KeyboardView} attributes. -->
     <style name="EmojiPalettesView" />
     <style name="MoreKeysKeyboard" />
     <style name="MoreKeysKeyboardView" />

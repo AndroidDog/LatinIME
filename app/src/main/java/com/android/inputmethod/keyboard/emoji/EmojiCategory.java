@@ -29,6 +29,7 @@ import com.android.inputmethod.keyboard.Key;
 import com.android.inputmethod.keyboard.Keyboard;
 import com.android.inputmethod.keyboard.KeyboardId;
 import com.android.inputmethod.keyboard.KeyboardLayoutSet;
+import com.android.inputmethod.latin.Constants;
 import com.android.inputmethod.latin.R;
 import com.android.inputmethod.latin.settings.Settings;
 
@@ -120,29 +121,22 @@ final class EmojiCategory {
             mCategoryTabIconId[i] = emojiPaletteViewAttr.getResourceId(
                     sCategoryTabIconAttr[i], 0);
         }
-
-        int defaultCategoryId = EmojiCategory.ID_SYMBOLS;
         addShownCategoryId(EmojiCategory.ID_RECENTS);
         if (BuildCompatUtils.EFFECTIVE_SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            defaultCategoryId = EmojiCategory.ID_PEOPLE;
             addShownCategoryId(EmojiCategory.ID_PEOPLE);
             addShownCategoryId(EmojiCategory.ID_OBJECTS);
             addShownCategoryId(EmojiCategory.ID_NATURE);
             addShownCategoryId(EmojiCategory.ID_PLACES);
+            mCurrentCategoryId =
+                    Settings.readLastShownEmojiCategoryId(mPrefs, EmojiCategory.ID_PEOPLE);
+        } else {
+            mCurrentCategoryId =
+                    Settings.readLastShownEmojiCategoryId(mPrefs, EmojiCategory.ID_SYMBOLS);
         }
         addShownCategoryId(EmojiCategory.ID_SYMBOLS);
         addShownCategoryId(EmojiCategory.ID_EMOTICONS);
-
-        DynamicGridKeyboard recentsKbd =
-                getKeyboard(EmojiCategory.ID_RECENTS, 0 /* cagetoryPageId */);
-        recentsKbd.loadRecentKeys(mCategoryKeyboardMap.values());
-
-        mCurrentCategoryId = Settings.readLastShownEmojiCategoryId(mPrefs, defaultCategoryId);
-        if (mCurrentCategoryId == EmojiCategory.ID_RECENTS &&
-                recentsKbd.getSortedKeys().isEmpty()) {
-            Log.i(TAG, "No recent emojis found, starting in category " + mCurrentCategoryId);
-            mCurrentCategoryId = defaultCategoryId;
-        }
+        getKeyboard(EmojiCategory.ID_RECENTS, 0 /* cagetoryPageId */)
+                .loadRecentKeys(mCategoryKeyboardMap.values());
     }
 
     private void addShownCategoryId(final int categoryId) {
@@ -153,7 +147,7 @@ final class EmojiCategory {
         mShownCategories.add(properties);
     }
 
-    public static String getCategoryName(final int categoryId, final int categoryPageId) {
+    public String getCategoryName(final int categoryId, final int categoryPageId) {
         return sCategoryName[categoryId] + "-" + categoryPageId;
     }
 
@@ -277,7 +271,7 @@ final class EmojiCategory {
     }
 
     private static final Long getCategoryKeyboardMapKey(final int categoryId, final int id) {
-        return (((long) categoryId) << Integer.SIZE) | id;
+        return (((long) categoryId) << Constants.MAX_INT_BIT_COUNT) | id;
     }
 
     public DynamicGridKeyboard getKeyboard(final int categoryId, final int id) {

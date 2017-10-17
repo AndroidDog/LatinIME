@@ -20,13 +20,10 @@ import android.os.Build;
 import android.view.inputmethod.InputMethodSubtype;
 
 import com.android.inputmethod.annotations.UsedForTesting;
-import com.android.inputmethod.latin.RichInputMethodSubtype;
-import com.android.inputmethod.latin.common.Constants;
+import com.android.inputmethod.latin.Constants;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-
-import javax.annotation.Nonnull;
 
 public final class InputMethodSubtypeCompatUtils {
     private static final String TAG = InputMethodSubtypeCompatUtils.class.getSimpleName();
@@ -54,8 +51,6 @@ public final class InputMethodSubtypeCompatUtils {
         // This utility class is not publicly instantiable.
     }
 
-    @SuppressWarnings("deprecation")
-    @Nonnull
     public static InputMethodSubtype newInputMethodSubtype(int nameId, int iconId, String locale,
             String mode, String extraValue, boolean isAuxiliary,
             boolean overridesImplicitlyEnabledSubtype, int id) {
@@ -67,10 +62,6 @@ public final class InputMethodSubtypeCompatUtils {
         return (InputMethodSubtype) CompatUtils.newInstance(CONSTRUCTOR_INPUT_METHOD_SUBTYPE,
                 nameId, iconId, locale, mode, extraValue, isAuxiliary,
                 overridesImplicitlyEnabledSubtype, id);
-    }
-
-    public static boolean isAsciiCapable(final RichInputMethodSubtype subtype) {
-        return isAsciiCapable(subtype.getRawSubtype());
     }
 
     public static boolean isAsciiCapable(final InputMethodSubtype subtype) {

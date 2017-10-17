@@ -16,15 +16,13 @@
 
 package com.android.inputmethod.latin.spellcheck;
 
-import android.annotation.TargetApi;
 import android.content.res.Resources;
-import android.os.Build;
 import android.view.textservice.SentenceSuggestionsInfo;
 import android.view.textservice.SuggestionsInfo;
 import android.view.textservice.TextInfo;
 
 import com.android.inputmethod.compat.TextInfoCompatUtils;
-import com.android.inputmethod.latin.common.Constants;
+import com.android.inputmethod.latin.Constants;
 import com.android.inputmethod.latin.settings.SpacingAndPunctuations;
 import com.android.inputmethod.latin.utils.RunInLocale;
 
@@ -78,19 +76,19 @@ public class SentenceLevelAdapter {
     private static class WordIterator {
         private final SpacingAndPunctuations mSpacingAndPunctuations;
         public WordIterator(final Resources res, final Locale locale) {
-            final RunInLocale<SpacingAndPunctuations> job =
-                    new RunInLocale<SpacingAndPunctuations>() {
+            final RunInLocale<SpacingAndPunctuations> job
+                    = new RunInLocale<SpacingAndPunctuations>() {
                 @Override
-                protected SpacingAndPunctuations job(final Resources r) {
-                    return new SpacingAndPunctuations(r);
+                protected SpacingAndPunctuations job(final Resources res) {
+                    return new SpacingAndPunctuations(res);
                 }
             };
             mSpacingAndPunctuations = job.runInLocale(res, locale);
         }
 
-        public int getEndOfWord(final CharSequence sequence, final int fromIndex) {
+        public int getEndOfWord(final CharSequence sequence, int index) {
             final int length = sequence.length();
-            int index = fromIndex < 0 ? 0 : Character.offsetByCodePoints(sequence, fromIndex, 1);
+            index = index < 0 ? 0 : Character.offsetByCodePoints(sequence, index, 1);
             while (index < length) {
                 final int codePoint = Character.codePointAt(sequence, index);
                 if (mSpacingAndPunctuations.isWordSeparator(codePoint)) {
@@ -113,12 +111,12 @@ public class SentenceLevelAdapter {
             return index;
         }
 
-        public int getBeginningOfNextWord(final CharSequence sequence, final int fromIndex) {
+        public int getBeginningOfNextWord(final CharSequence sequence, int index) {
             final int length = sequence.length();
-            if (fromIndex >= length) {
+            if (index >= length) {
                 return -1;
             }
-            int index = fromIndex < 0 ? 0 : Character.offsetByCodePoints(sequence, fromIndex, 1);
+            index = index < 0 ? 0 : Character.offsetByCodePoints(sequence, index, 1);
             while (index < length) {
                 final int codePoint = Character.codePointAt(sequence, index);
                 if (!mSpacingAndPunctuations.isWordSeparator(codePoint)) {
@@ -142,13 +140,14 @@ public class SentenceLevelAdapter {
         final int cookie = originalTextInfo.getCookie();
         final int start = -1;
         final int end = originalText.length();
-        final ArrayList<SentenceWordItem> wordItems = new ArrayList<>();
+        final ArrayList<SentenceWordItem> wordItems = new ArrayList<SentenceWordItem>();
         int wordStart = wordIterator.getBeginningOfNextWord(originalText, start);
         int wordEnd = wordIterator.getEndOfWord(originalText, wordStart);
         while (wordStart <= end && wordEnd != -1 && wordStart != -1) {
             if (wordEnd >= start && wordEnd > wordStart) {
-                final TextInfo ti = TextInfoCompatUtils.newInstance(originalText, wordStart,
-                        wordEnd, cookie, originalText.subSequence(wordStart, wordEnd).hashCode());
+                CharSequence subSequence = originalText.subSequence(wordStart, wordEnd).toString();
+                final TextInfo ti = TextInfoCompatUtils.newInstance(subSequence, 0,
+                        subSequence.length(), cookie, subSequence.hashCode());
                 wordItems.add(new SentenceWordItem(ti, wordStart, wordEnd));
             }
             wordStart = wordIterator.getBeginningOfNextWord(originalText, wordEnd);
@@ -160,7 +159,6 @@ public class SentenceLevelAdapter {
         return new SentenceTextInfoParams(originalTextInfo, wordItems);
     }
 
-    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     public static SentenceSuggestionsInfo reconstructSuggestions(
             SentenceTextInfoParams originalTextInfoParams, SuggestionsInfo[] results) {
         if (results == null || results.length == 0) {

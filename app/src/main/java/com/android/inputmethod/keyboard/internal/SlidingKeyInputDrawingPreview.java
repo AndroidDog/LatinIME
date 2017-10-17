@@ -23,7 +23,7 @@ import android.graphics.Path;
 
 import com.android.inputmethod.keyboard.PointerTracker;
 import com.android.inputmethod.latin.R;
-import com.android.inputmethod.latin.common.CoordinateUtils;
+import com.android.inputmethod.latin.utils.CoordinateUtils;
 
 /**
  * Draw rubber band preview graphics during sliding key input.

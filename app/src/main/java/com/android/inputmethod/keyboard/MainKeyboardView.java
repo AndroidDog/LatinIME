@@ -28,43 +28,39 @@ import android.graphics.Paint;
 import android.graphics.Paint.Align;
 import android.graphics.Typeface;
 import android.preference.PreferenceManager;
-import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodSubtype;
 
 import com.android.inputmethod.accessibility.AccessibilityUtils;
 import com.android.inputmethod.accessibility.MainKeyboardAccessibilityDelegate;
 import com.android.inputmethod.annotations.ExternallyReferenced;
+import com.android.inputmethod.keyboard.internal.DrawingHandler;
 import com.android.inputmethod.keyboard.internal.DrawingPreviewPlacerView;
-import com.android.inputmethod.keyboard.internal.DrawingProxy;
 import com.android.inputmethod.keyboard.internal.GestureFloatingTextDrawingPreview;
 import com.android.inputmethod.keyboard.internal.GestureTrailsDrawingPreview;
 import com.android.inputmethod.keyboard.internal.KeyDrawParams;
 import com.android.inputmethod.keyboard.internal.KeyPreviewChoreographer;
 import com.android.inputmethod.keyboard.internal.KeyPreviewDrawParams;
 import com.android.inputmethod.keyboard.internal.KeyPreviewView;
+import com.android.inputmethod.keyboard.internal.LanguageOnSpacebarHelper;
 import com.android.inputmethod.keyboard.internal.MoreKeySpec;
 import com.android.inputmethod.keyboard.internal.NonDistinctMultitouchHelper;
 import com.android.inputmethod.keyboard.internal.SlidingKeyInputDrawingPreview;
 import com.android.inputmethod.keyboard.internal.TimerHandler;
+import com.android.inputmethod.latin.Constants;
 import com.android.inputmethod.latin.R;
-import com.android.inputmethod.latin.RichInputMethodSubtype;
 import com.android.inputmethod.latin.SuggestedWords;
-import com.android.inputmethod.latin.common.Constants;
-import com.android.inputmethod.latin.common.CoordinateUtils;
 import com.android.inputmethod.latin.settings.DebugSettings;
-import com.android.inputmethod.latin.utils.LanguageOnSpacebarUtils;
+import com.android.inputmethod.latin.utils.CoordinateUtils;
+import com.android.inputmethod.latin.utils.SpacebarLanguageUtils;
 import com.android.inputmethod.latin.utils.TypefaceUtils;
 
-import java.util.Locale;
 import java.util.WeakHashMap;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 /**
  * A view that is responsible for detecting key presses and touch movements.
@@ -109,8 +105,8 @@ import javax.annotation.Nullable;
  * @attr ref R.styleable#MainKeyboardView_gestureRecognitionSpeedThreshold
  * @attr ref R.styleable#MainKeyboardView_suppressKeyPreviewAfterBatchInputDuration
  */
-public final class MainKeyboardView extends KeyboardView implements DrawingProxy,
-        MoreKeysPanel.Controller {
+public final class MainKeyboardView extends KeyboardView implements PointerTracker.DrawingProxy,
+        MoreKeysPanel.Controller, DrawingHandler.Callbacks, TimerHandler.Callbacks {
     private static final String TAG = MainKeyboardView.class.getSimpleName();
 
     /** Listener for {@link KeyboardActionListener}. */
@@ -151,6 +147,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
     // More keys keyboard
     private final Paint mBackgroundDimAlphaPaint = new Paint();
+    private boolean mNeedsToDimEntireKeyboard;
     private final View mMoreKeysKeyboardContainer;
     private final View mMoreKeysKeyboardForActionContainer;
     private final WeakHashMap<Key, Keyboard> mMoreKeysKeyboardCache = new WeakHashMap<>();
@@ -166,8 +163,10 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     private final KeyDetector mKeyDetector;
     private final NonDistinctMultitouchHelper mNonDistinctMultitouchHelper;
 
-    private final TimerHandler mTimerHandler;
+    private final TimerHandler mKeyTimerHandler;
     private final int mLanguageOnSpacebarHorizontalMargin;
+
+    private final DrawingHandler mDrawingHandler = new DrawingHandler(this);
 
     private MainKeyboardAccessibilityDelegate mAccessibilityDelegate;
 
@@ -178,8 +177,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     public MainKeyboardView(final Context context, final AttributeSet attrs, final int defStyle) {
         super(context, attrs, defStyle);
 
-        final DrawingPreviewPlacerView drawingPreviewPlacerView =
-                new DrawingPreviewPlacerView(context, attrs);
+        mDrawingPreviewPlacerView = new DrawingPreviewPlacerView(context, attrs);
 
         final TypedArray mainKeyboardViewAttr = context.obtainStyledAttributes(
                 attrs, R.styleable.MainKeyboardView, defStyle, R.style.MainKeyboardView);
@@ -187,7 +185,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
                 R.styleable.MainKeyboardView_ignoreAltCodeKeyTimeout, 0);
         final int gestureRecognitionUpdateTime = mainKeyboardViewAttr.getInt(
                 R.styleable.MainKeyboardView_gestureRecognitionUpdateTime, 0);
-        mTimerHandler = new TimerHandler(
+        mKeyTimerHandler = new TimerHandler(
                 this, ignoreAltCodeKeyTimeout, gestureRecognitionUpdateTime);
 
         final float keyHysteresisDistance = mainKeyboardViewAttr.getDimension(
@@ -197,7 +195,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         mKeyDetector = new KeyDetector(
                 keyHysteresisDistance, keyHysteresisDistanceForSlidingModifier);
 
-        PointerTracker.init(mainKeyboardViewAttr, mTimerHandler, this /* DrawingProxy */);
+        PointerTracker.init(mainKeyboardViewAttr, mKeyTimerHandler, this /* DrawingProxy */);
 
         final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         final boolean forceNonDistinctMultitouch = prefs.getBoolean(
@@ -247,16 +245,14 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
         mGestureFloatingTextDrawingPreview = new GestureFloatingTextDrawingPreview(
                 mainKeyboardViewAttr);
-        mGestureFloatingTextDrawingPreview.setDrawingView(drawingPreviewPlacerView);
+        mGestureFloatingTextDrawingPreview.setDrawingView(mDrawingPreviewPlacerView);
 
         mGestureTrailsDrawingPreview = new GestureTrailsDrawingPreview(mainKeyboardViewAttr);
-        mGestureTrailsDrawingPreview.setDrawingView(drawingPreviewPlacerView);
+        mGestureTrailsDrawingPreview.setDrawingView(mDrawingPreviewPlacerView);
 
         mSlidingKeyInputDrawingPreview = new SlidingKeyInputDrawingPreview(mainKeyboardViewAttr);
-        mSlidingKeyInputDrawingPreview.setDrawingView(drawingPreviewPlacerView);
+        mSlidingKeyInputDrawingPreview.setDrawingView(mDrawingPreviewPlacerView);
         mainKeyboardViewAttr.recycle();
-
-        mDrawingPreviewPlacerView = drawingPreviewPlacerView;
 
         final LayoutInflater inflater = LayoutInflater.from(getContext());
         mMoreKeysKeyboardContainer = inflater.inflate(moreKeysKeyboardLayoutId, null);
@@ -310,24 +306,17 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         animatorToStart.setCurrentPlayTime(startTime);
     }
 
-    // Implements {@link DrawingProxy#startWhileTypingAnimation(int)}.
-    /**
-     * Called when a while-typing-animation should be started.
-     * @param fadeInOrOut {@link DrawingProxy#FADE_IN} starts while-typing-fade-in animation.
-     * {@link DrawingProxy#FADE_OUT} starts while-typing-fade-out animation.
-     */
+    // Implements {@link TimerHander.Callbacks} method.
     @Override
-    public void startWhileTypingAnimation(final int fadeInOrOut) {
-        switch (fadeInOrOut) {
-        case DrawingProxy.FADE_IN:
-            cancelAndStartAnimators(
-                    mAltCodeKeyWhileTypingFadeoutAnimator, mAltCodeKeyWhileTypingFadeinAnimator);
-            break;
-        case DrawingProxy.FADE_OUT:
-            cancelAndStartAnimators(
-                    mAltCodeKeyWhileTypingFadeinAnimator, mAltCodeKeyWhileTypingFadeoutAnimator);
-            break;
-        }
+    public void startWhileTypingFadeinAnimation() {
+        cancelAndStartAnimators(
+                mAltCodeKeyWhileTypingFadeoutAnimator, mAltCodeKeyWhileTypingFadeinAnimator);
+    }
+
+    @Override
+    public void startWhileTypingFadeoutAnimation() {
+        cancelAndStartAnimators(
+                mAltCodeKeyWhileTypingFadeinAnimator, mAltCodeKeyWhileTypingFadeoutAnimator);
     }
 
     @ExternallyReferenced
@@ -389,7 +378,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     @Override
     public void setKeyboard(final Keyboard keyboard) {
         // Remove any pending messages, except dismissing preview and key repeat.
-        mTimerHandler.cancelLongPressTimers();
+        mKeyTimerHandler.cancelLongPressTimers();
         super.setKeyboard(keyboard);
         mKeyDetector.setKeyboard(
                 keyboard, -getPaddingLeft(), -getPaddingTop() + getVerticalCorrection());
@@ -461,17 +450,19 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         windowContentView.addView(mDrawingPreviewPlacerView);
     }
 
-    // Implements {@link DrawingProxy#onKeyPressed(Key,boolean)}.
+    // Implements {@link DrawingHandler.Callbacks} method.
     @Override
-    public void onKeyPressed(@Nonnull final Key key, final boolean withPreview) {
-        key.onPressed();
-        invalidateKey(key);
-        if (withPreview && !key.noKeyPreview()) {
-            showKeyPreview(key);
-        }
+    public void dismissAllKeyPreviews() {
+        mKeyPreviewChoreographer.dismissAllKeyPreviews();
+        PointerTracker.setReleasedKeyGraphicsToAllKeys();
     }
 
-    private void showKeyPreview(@Nonnull final Key key) {
+    @Override
+    public void showKeyPreview(final Key key) {
+        // If the key is invalid or has no key preview, we must not show key preview.
+        if (key == null || key.noKeyPreview()) {
+            return;
+        }
         final Keyboard keyboard = getKeyboard();
         if (keyboard == null) {
             return;
@@ -484,36 +475,26 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
         locatePreviewPlacerView();
         getLocationInWindow(mOriginCoords);
-        mKeyPreviewChoreographer.placeAndShowKeyPreview(key, keyboard.mIconsSet, getKeyDrawParams(),
+        mKeyPreviewChoreographer.placeAndShowKeyPreview(key, keyboard.mIconsSet, mKeyDrawParams,
                 getWidth(), mOriginCoords, mDrawingPreviewPlacerView, isHardwareAccelerated());
     }
 
-    private void dismissKeyPreviewWithoutDelay(@Nonnull final Key key) {
-        mKeyPreviewChoreographer.dismissKeyPreview(key, false /* withAnimation */);
-        invalidateKey(key);
-    }
-
-    // Implements {@link DrawingProxy#onKeyReleased(Key,boolean)}.
+    // Implements {@link TimerHandler.Callbacks} method.
     @Override
-    public void onKeyReleased(@Nonnull final Key key, final boolean withAnimation) {
-        key.onReleased();
+    public void dismissKeyPreviewWithoutDelay(final Key key) {
+        mKeyPreviewChoreographer.dismissKeyPreview(key, false /* withAnimation */);
+        // To redraw key top letter.
         invalidateKey(key);
-        if (!key.noKeyPreview()) {
-            if (withAnimation) {
-                dismissKeyPreview(key);
-            } else {
-                dismissKeyPreviewWithoutDelay(key);
-            }
-        }
     }
 
-    private void dismissKeyPreview(@Nonnull final Key key) {
-        if (isHardwareAccelerated()) {
-            mKeyPreviewChoreographer.dismissKeyPreview(key, true /* withAnimation */);
+    @Override
+    public void dismissKeyPreview(final Key key) {
+        if (!isHardwareAccelerated()) {
+            // TODO: Implement preference option to control key preview method and duration.
+            mDrawingHandler.dismissKeyPreview(mKeyPreviewDrawParams.getLingerTimeout(), key);
             return;
         }
-        // TODO: Implement preference option to control key preview method and duration.
-        mTimerHandler.postDismissKeyPreview(key, mKeyPreviewDrawParams.getLingerTimeout());
+        mKeyPreviewChoreographer.dismissKeyPreview(key, true /* withAnimation */);
     }
 
     public void setSlidingKeyInputPreviewEnabled(final boolean enabled) {
@@ -521,13 +502,14 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     }
 
     @Override
-    public void showSlidingKeyInputPreview(@Nullable final PointerTracker tracker) {
+    public void showSlidingKeyInputPreview(final PointerTracker tracker) {
         locatePreviewPlacerView();
-        if (tracker != null) {
-            mSlidingKeyInputDrawingPreview.setPreviewPosition(tracker);
-        } else {
-            mSlidingKeyInputDrawingPreview.dismissSlidingKeyInputPreview();
-        }
+        mSlidingKeyInputDrawingPreview.setPreviewPosition(tracker);
+    }
+
+    @Override
+    public void dismissSlidingKeyInputPreview() {
+        mSlidingKeyInputDrawingPreview.dismissSlidingKeyInputPreview();
     }
 
     private void setGesturePreviewMode(final boolean isGestureTrailEnabled,
@@ -536,26 +518,20 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         mGestureTrailsDrawingPreview.setPreviewEnabled(isGestureTrailEnabled);
     }
 
-    public void showGestureFloatingPreviewText(@Nonnull final SuggestedWords suggestedWords,
-            final boolean dismissDelayed) {
+    // Implements {@link DrawingHandler.Callbacks} method.
+    @Override
+    public void showGestureFloatingPreviewText(final SuggestedWords suggestedWords) {
         locatePreviewPlacerView();
-        final GestureFloatingTextDrawingPreview gestureFloatingTextDrawingPreview =
-                mGestureFloatingTextDrawingPreview;
-        gestureFloatingTextDrawingPreview.setSuggetedWords(suggestedWords);
-        if (dismissDelayed) {
-            mTimerHandler.postDismissGestureFloatingPreviewText(
-                    mGestureFloatingPreviewTextLingerTimeout);
-        }
+        mGestureFloatingTextDrawingPreview.setSuggetedWords(suggestedWords);
     }
 
-    // Implements {@link DrawingProxy#dismissGestureFloatingPreviewTextWithoutDelay()}.
-    @Override
-    public void dismissGestureFloatingPreviewTextWithoutDelay() {
-        mGestureFloatingTextDrawingPreview.dismissGestureFloatingPreviewText();
+    public void dismissGestureFloatingPreviewText() {
+        locatePreviewPlacerView();
+        mDrawingHandler.dismissGestureFloatingPreviewText(mGestureFloatingPreviewTextLingerTimeout);
     }
 
     @Override
-    public void showGestureTrail(@Nonnull final PointerTracker tracker,
+    public void showGestureTrail(final PointerTracker tracker,
             final boolean showsFloatingPreviewText) {
         locatePreviewPlacerView();
         if (showsFloatingPreviewText) {
@@ -590,11 +566,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         mDrawingPreviewPlacerView.removeAllViews();
     }
 
-    // Implements {@link DrawingProxy@showMoreKeysKeyboard(Key,PointerTracker)}.
-    @Override
-    @Nullable
-    public MoreKeysPanel showMoreKeysKeyboard(@Nonnull final Key key,
-            @Nonnull final PointerTracker tracker) {
+    private MoreKeysPanel onCreateMoreKeysPanel(final Key key, final Context context) {
         final MoreKeySpec[] moreKeys = key.getMoreKeys();
         if (moreKeys == null) {
             return null;
@@ -610,7 +582,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
                     && !key.noKeyPreview() && moreKeys.length == 1
                     && mKeyPreviewDrawParams.getVisibleWidth() > 0;
             final MoreKeysKeyboard.Builder builder = new MoreKeysKeyboard.Builder(
-                    getContext(), key, getKeyboard(), isSingleMoreKeyWithPreview,
+                    context, key, getKeyboard(), isSingleMoreKeyWithPreview,
                     mKeyPreviewDrawParams.getVisibleWidth(),
                     mKeyPreviewDrawParams.getVisibleHeight(), newLabelPaint(key));
             moreKeysKeyboard = builder.build();
@@ -623,6 +595,50 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
                 (MoreKeysKeyboardView)container.findViewById(R.id.more_keys_keyboard_view);
         moreKeysKeyboardView.setKeyboard(moreKeysKeyboard);
         container.measure(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        return moreKeysKeyboardView;
+    }
+
+    // Implements {@link TimerHandler.Callbacks} method.
+    /**
+     * Called when a key is long pressed.
+     * @param tracker the pointer tracker which pressed the parent key
+     */
+    @Override
+    public void onLongPress(final PointerTracker tracker) {
+        if (isShowingMoreKeysPanel()) {
+            return;
+        }
+        final Key key = tracker.getKey();
+        if (key == null) {
+            return;
+        }
+        final KeyboardActionListener listener = mKeyboardActionListener;
+        if (key.hasNoPanelAutoMoreKey()) {
+            final int moreKeyCode = key.getMoreKeys()[0].mCode;
+            tracker.onLongPressed();
+            listener.onPressKey(moreKeyCode, 0 /* repeatCount */, true /* isSinglePointer */);
+            listener.onCodeInput(moreKeyCode, Constants.NOT_A_COORDINATE,
+                    Constants.NOT_A_COORDINATE, false /* isKeyRepeat */);
+            listener.onReleaseKey(moreKeyCode, false /* withSliding */);
+            return;
+        }
+        final int code = key.getCode();
+        if (code == Constants.CODE_SPACE || code == Constants.CODE_LANGUAGE_SWITCH) {
+            // Long pressing the space key invokes IME switcher dialog.
+            if (listener.onCustomRequest(Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER)) {
+                tracker.onLongPressed();
+                listener.onReleaseKey(code, false /* withSliding */);
+                return;
+            }
+        }
+        openMoreKeysPanel(key, tracker);
+    }
+
+    private void openMoreKeysPanel(final Key key, final PointerTracker tracker) {
+        final MoreKeysPanel moreKeysPanel = onCreateMoreKeysPanel(key, getContext());
+        if (moreKeysPanel == null) {
+            return;
+        }
 
         final int[] lastCoords = CoordinateUtils.newInstance();
         tracker.getLastCoordinates(lastCoords);
@@ -640,8 +656,10 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         // {@code mPreviewVisibleOffset} has been set appropriately in
         // {@link KeyboardView#showKeyPreview(PointerTracker)}.
         final int pointY = key.getY() + mKeyPreviewDrawParams.getVisibleOffset();
-        moreKeysKeyboardView.showMoreKeysPanel(this, this, pointX, pointY, mKeyboardActionListener);
-        return moreKeysKeyboardView;
+        moreKeysPanel.showMoreKeysPanel(this, this, pointX, pointY, mKeyboardActionListener);
+        tracker.onShowMoreKeysPanel(moreKeysPanel);
+        // TODO: Implement zoom in animation of more keys panel.
+        dismissKeyPreviewWithoutDelay(key);
     }
 
     public boolean isInDraggingFinger() {
@@ -654,14 +672,9 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     @Override
     public void onShowMoreKeysPanel(final MoreKeysPanel panel) {
         locatePreviewPlacerView();
-        // Dismiss another {@link MoreKeysPanel} that may be being showed.
-        onDismissMoreKeysPanel();
-        // Dismiss all key previews that may be being showed.
-        PointerTracker.setReleasedKeyGraphicsToAllKeys();
-        // Dismiss sliding key input preview that may be being showed.
-        mSlidingKeyInputDrawingPreview.dismissSlidingKeyInputPreview();
         panel.showInParent(mDrawingPreviewPlacerView);
         mMoreKeysPanel = panel;
+        dimEntireKeyboard(true /* dimmed */);
     }
 
     public boolean isShowingMoreKeysPanel() {
@@ -675,6 +688,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
     @Override
     public void onDismissMoreKeysPanel() {
+        dimEntireKeyboard(false /* dimmed */);
         if (isShowingMoreKeysPanel()) {
             mMoreKeysPanel.removeFromParent();
             mMoreKeysPanel = null;
@@ -682,37 +696,37 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     }
 
     public void startDoubleTapShiftKeyTimer() {
-        mTimerHandler.startDoubleTapShiftKeyTimer();
+        mKeyTimerHandler.startDoubleTapShiftKeyTimer();
     }
 
     public void cancelDoubleTapShiftKeyTimer() {
-        mTimerHandler.cancelDoubleTapShiftKeyTimer();
+        mKeyTimerHandler.cancelDoubleTapShiftKeyTimer();
     }
 
     public boolean isInDoubleTapShiftKeyTimeout() {
-        return mTimerHandler.isInDoubleTapShiftKeyTimeout();
+        return mKeyTimerHandler.isInDoubleTapShiftKeyTimeout();
     }
 
     @Override
-    public boolean onTouchEvent(final MotionEvent event) {
+    public boolean onTouchEvent(final MotionEvent me) {
         if (getKeyboard() == null) {
             return false;
         }
         if (mNonDistinctMultitouchHelper != null) {
-            if (event.getPointerCount() > 1 && mTimerHandler.isInKeyRepeat()) {
+            if (me.getPointerCount() > 1 && mKeyTimerHandler.isInKeyRepeat()) {
                 // Key repeating timer will be canceled if 2 or more keys are in action.
-                mTimerHandler.cancelKeyRepeatTimers();
+                mKeyTimerHandler.cancelKeyRepeatTimers();
             }
             // Non distinct multitouch screen support
-            mNonDistinctMultitouchHelper.processMotionEvent(event, mKeyDetector);
+            mNonDistinctMultitouchHelper.processMotionEvent(me, mKeyDetector);
             return true;
         }
-        return processMotionEvent(event);
+        return processMotionEvent(me);
     }
 
-    public boolean processMotionEvent(final MotionEvent event) {
-        final int index = event.getActionIndex();
-        final int id = event.getPointerId(index);
+    public boolean processMotionEvent(final MotionEvent me) {
+        final int index = me.getActionIndex();
+        final int id = me.getPointerId(index);
         final PointerTracker tracker = PointerTracker.getPointerTracker(id);
         // When a more keys panel is showing, we should ignore other fingers' single touch events
         // other than the finger that is showing the more keys panel.
@@ -720,15 +734,16 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
                 && PointerTracker.getActivePointerTrackerCount() == 1) {
             return true;
         }
-        tracker.processMotionEvent(event, mKeyDetector);
+        tracker.processMotionEvent(me, mKeyDetector);
         return true;
     }
 
     public void cancelAllOngoingEvents() {
-        mTimerHandler.cancelAllMessages();
-        PointerTracker.setReleasedKeyGraphicsToAllKeys();
-        mGestureFloatingTextDrawingPreview.dismissGestureFloatingPreviewText();
-        mSlidingKeyInputDrawingPreview.dismissSlidingKeyInputPreview();
+        mKeyTimerHandler.cancelAllMessages();
+        mDrawingHandler.cancelAllMessages();
+        dismissAllKeyPreviews();
+        dismissGestureFloatingPreviewText();
+        dismissSlidingKeyInputPreview();
         PointerTracker.dismissAllMoreKeysPanels();
         PointerTracker.cancelAllPointerTrackers();
     }
@@ -783,10 +798,10 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         mHasMultipleEnabledIMEsOrSubtypes = hasMultipleEnabledIMEsOrSubtypes;
         final ObjectAnimator animator = mLanguageOnSpacebarFadeoutAnimator;
         if (animator == null) {
-            mLanguageOnSpacebarFormatType = LanguageOnSpacebarUtils.FORMAT_TYPE_NONE;
+            mLanguageOnSpacebarFormatType = LanguageOnSpacebarHelper.FORMAT_TYPE_NONE;
         } else {
             if (subtypeChanged
-                    && languageOnSpacebarFormatType != LanguageOnSpacebarUtils.FORMAT_TYPE_NONE) {
+                    && languageOnSpacebarFormatType != LanguageOnSpacebarHelper.FORMAT_TYPE_NONE) {
                 setLanguageOnSpacebarAnimAlpha(Constants.Color.ALPHA_OPAQUE);
                 if (animator.isStarted()) {
                     animator.cancel();
@@ -801,6 +816,24 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         invalidateKey(mSpaceKey);
     }
 
+    private void dimEntireKeyboard(final boolean dimmed) {
+        final boolean needsRedrawing = mNeedsToDimEntireKeyboard != dimmed;
+        mNeedsToDimEntireKeyboard = dimmed;
+        if (needsRedrawing) {
+            invalidateAllKeys();
+        }
+    }
+
+    @Override
+    protected void onDraw(final Canvas canvas) {
+        super.onDraw(canvas);
+
+        // Overlay a dark rectangle to dim.
+        if (mNeedsToDimEntireKeyboard) {
+            canvas.drawRect(0.0f, 0.0f, getWidth(), getHeight(), mBackgroundDimAlphaPaint);
+        }
+    }
+
     @Override
     protected void onDrawKeyTopVisuals(final Key key, final Canvas canvas, final Paint paint,
             final KeyDrawParams params) {
@@ -811,7 +844,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         final int code = key.getCode();
         if (code == Constants.CODE_SPACE) {
             // If input language are explicitly selected.
-            if (mLanguageOnSpacebarFormatType != LanguageOnSpacebarUtils.FORMAT_TYPE_NONE) {
+            if (mLanguageOnSpacebarFormatType != LanguageOnSpacebarHelper.FORMAT_TYPE_NONE) {
                 drawLanguageOnSpacebar(key, canvas, paint);
             }
             // Whether space key needs to show the "..." popup hint for special purposes
@@ -842,16 +875,16 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
 
     // Layout language name on spacebar.
     private String layoutLanguageOnSpacebar(final Paint paint,
-            final RichInputMethodSubtype subtype, final int width) {
+            final InputMethodSubtype subtype, final int width) {
         // Choose appropriate language name to fit into the width.
-        if (mLanguageOnSpacebarFormatType == LanguageOnSpacebarUtils.FORMAT_TYPE_FULL_LOCALE) {
-            final String fullText = subtype.getFullDisplayName();
+        if (mLanguageOnSpacebarFormatType == LanguageOnSpacebarHelper.FORMAT_TYPE_FULL_LOCALE) {
+            final String fullText = SpacebarLanguageUtils.getFullDisplayName(subtype);
             if (fitsTextIntoWidth(width, fullText, paint)) {
                 return fullText;
             }
         }
 
-        final String middleText = subtype.getMiddleDisplayName();
+        final String middleText = SpacebarLanguageUtils.getMiddleDisplayName(subtype);
         if (fitsTextIntoWidth(width, middleText, paint)) {
             return middleText;
         }
@@ -860,16 +893,13 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     }
 
     private void drawLanguageOnSpacebar(final Key key, final Canvas canvas, final Paint paint) {
-        final Keyboard keyboard = getKeyboard();
-        if (keyboard == null) {
-            return;
-        }
         final int width = key.getWidth();
         final int height = key.getHeight();
         paint.setTextAlign(Align.CENTER);
         paint.setTypeface(Typeface.DEFAULT);
         paint.setTextSize(mLanguageOnSpacebarTextSize);
-        final String language = layoutLanguageOnSpacebar(paint, keyboard.mId.mSubtype, width);
+        final InputMethodSubtype subtype = getKeyboard().mId.mSubtype;
+        final String language = layoutLanguageOnSpacebar(paint, subtype, width);
         // Draw language text with shadow
         final float descent = paint.descent();
         final float textHeight = -paint.ascent() + descent;

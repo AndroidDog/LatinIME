@@ -31,13 +31,11 @@ import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 
 import com.android.inputmethod.latin.R;
-import com.android.inputmethod.latin.common.LocaleUtils;
+import com.android.inputmethod.latin.utils.LocaleUtils;
 
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeSet;
-
-import javax.annotation.Nullable;
 
 // Caveat: This class is basically taken from
 // packages/apps/Settings/src/com/android/settings/inputmethod/UserDictionaryList.java
@@ -49,12 +47,12 @@ public class UserDictionaryList extends PreferenceFragment {
             "android.settings.USER_DICTIONARY_SETTINGS";
 
     @Override
-    public void onCreate(final Bundle icicle) {
+    public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
         setPreferenceScreen(getPreferenceManager().createPreferenceScreen(getActivity()));
     }
 
-    public static TreeSet<String> getUserDictionaryLocalesSet(final Activity activity) {
+    public static TreeSet<String> getUserDictionaryLocalesSet(Activity activity) {
         final Cursor cursor = activity.getContentResolver().query(UserDictionary.Words.CONTENT_URI,
                 new String[] { UserDictionary.Words.LOCALE },
                 null, null, null);
@@ -110,7 +108,7 @@ public class UserDictionaryList extends PreferenceFragment {
      * Creates the entries that allow the user to go into the user dictionary for each locale.
      * @param userDictGroup The group to put the settings in.
      */
-    protected void createUserDictSettings(final PreferenceGroup userDictGroup) {
+    protected void createUserDictSettings(PreferenceGroup userDictGroup) {
         final Activity activity = getActivity();
         userDictGroup.removeAll();
         final TreeSet<String> localeSet =
@@ -123,33 +121,31 @@ public class UserDictionaryList extends PreferenceFragment {
         }
 
         if (localeSet.isEmpty()) {
-            userDictGroup.addPreference(createUserDictionaryPreference(null));
+            userDictGroup.addPreference(createUserDictionaryPreference(null, activity));
         } else {
             for (String locale : localeSet) {
-                userDictGroup.addPreference(createUserDictionaryPreference(locale));
+                userDictGroup.addPreference(createUserDictionaryPreference(locale, activity));
             }
         }
     }
 
     /**
      * Create a single User Dictionary Preference object, with its parameters set.
-     * @param localeString The locale for which this user dictionary is for.
+     * @param locale The locale for which this user dictionary is for.
      * @return The corresponding preference.
      */
-    protected Preference createUserDictionaryPreference(@Nullable final String localeString) {
+    protected Preference createUserDictionaryPreference(String locale, Activity activity) {
         final Preference newPref = new Preference(getActivity());
         final Intent intent = new Intent(USER_DICTIONARY_SETTINGS_INTENT_ACTION);
-        if (null == localeString) {
+        if (null == locale) {
             newPref.setTitle(Locale.getDefault().getDisplayName());
         } else {
-            if (localeString.isEmpty()) {
+            if ("".equals(locale))
                 newPref.setTitle(getString(R.string.user_dict_settings_all_languages));
-            } else {
-                newPref.setTitle(
-                        LocaleUtils.constructLocaleFromString(localeString).getDisplayName());
-            }
-            intent.putExtra("locale", localeString);
-            newPref.getExtras().putString("locale", localeString);
+            else
+                newPref.setTitle(LocaleUtils.constructLocaleFromString(locale).getDisplayName());
+            intent.putExtra("locale", locale);
+            newPref.getExtras().putString("locale", locale);
         }
         newPref.setIntent(intent);
         newPref.setFragment(UserDictionarySettings.class.getName());
@@ -162,4 +158,3 @@ public class UserDictionaryList extends PreferenceFragment {
         createUserDictSettings(getPreferenceScreen());
     }
 }
-

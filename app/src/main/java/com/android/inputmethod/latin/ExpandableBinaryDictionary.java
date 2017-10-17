@@ -20,41 +20,35 @@ import android.content.Context;
 import android.util.Log;
 
 import com.android.inputmethod.annotations.UsedForTesting;
-import com.android.inputmethod.latin.SuggestedWords.SuggestedWordInfo;
-import com.android.inputmethod.latin.common.ComposedData;
-import com.android.inputmethod.latin.common.FileUtils;
-import com.android.inputmethod.latin.define.DecoderSpecificConstants;
+import com.android.inputmethod.keyboard.ProximityInfo;
 import com.android.inputmethod.latin.makedict.DictionaryHeader;
 import com.android.inputmethod.latin.makedict.FormatSpec;
 import com.android.inputmethod.latin.makedict.UnsupportedFormatException;
 import com.android.inputmethod.latin.makedict.WordProperty;
+import com.android.inputmethod.latin.SuggestedWords.SuggestedWordInfo;
 import com.android.inputmethod.latin.settings.SettingsValuesForSuggestion;
-import com.android.inputmethod.latin.utils.AsyncResultHolder;
 import com.android.inputmethod.latin.utils.CombinedFormatUtils;
+import com.android.inputmethod.latin.utils.DistracterFilter;
 import com.android.inputmethod.latin.utils.ExecutorUtils;
-import com.android.inputmethod.latin.utils.WordInputEventForPersonalization;
+import com.android.inputmethod.latin.utils.FileUtils;
+import com.android.inputmethod.latin.utils.LanguageModelParam;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 /**
  * Abstract base class for an expandable dictionary that can be created and updated dynamically
  * during runtime. When updated it automatically generates a new binary dictionary to handle future
  * queries in native code. This binary dictionary is written to internal storage.
- *
- * A class that extends this abstract class must have a static factory method named
- *   getDictionary(Context context, Locale locale, File dictFile, String dictNamePrefix)
  */
 abstract public class ExpandableBinaryDictionary extends Dictionary {
     private static final boolean DEBUG = false;
@@ -67,16 +61,15 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
 
     private static final int TIMEOUT_FOR_READ_OPS_IN_MILLISECONDS = 100;
 
+    private static final int DEFAULT_MAX_UNIGRAM_COUNT = 10000;
+    private static final int DEFAULT_MAX_BIGRAM_COUNT = 10000;
+
     /**
      * The maximum length of a word in this dictionary.
      */
-    protected static final int MAX_WORD_LENGTH =
-            DecoderSpecificConstants.DICTIONARY_MAX_WORD_LENGTH;
+    protected static final int MAX_WORD_LENGTH = Constants.DICTIONARY_MAX_WORD_LENGTH;
 
     private static final int DICTIONARY_FORMAT_VERSION = FormatSpec.VERSION4;
-
-    private static final WordProperty[] DEFAULT_WORD_PROPERTIES_FOR_SYNC =
-            new WordProperty[0] /* default */;
 
     /** The application context. */
     protected final Context mContext;
@@ -92,6 +85,9 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
      * dictionary.
      */
     private final String mDictName;
+
+    /** Dictionary locale */
+    private final Locale mLocale;
 
     /** Dictionary file */
     private final File mDictFile;
@@ -114,14 +110,14 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
      */
     protected abstract void loadInitialContentsLocked();
 
-    static boolean matchesExpectedBinaryDictFormatVersionForThisType(final int formatVersion) {
+    private boolean matchesExpectedBinaryDictFormatVersionForThisType(final int formatVersion) {
         return formatVersion == FormatSpec.VERSION4;
     }
 
-    private static boolean needsToMigrateDictionary(final int formatVersion) {
+    private boolean needsToMigrateDictionary(final int formatVersion) {
         // When we bump up the dictionary format version, the old version should be added to here
         // for supporting migration. Note that native code has to support reading such formats.
-        return formatVersion == FormatSpec.VERSION402;
+        return formatVersion == FormatSpec.VERSION4_ONLY_FOR_TESTING;
     }
 
     public boolean isValidDictionaryLocked() {
@@ -141,9 +137,10 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
      */
     public ExpandableBinaryDictionary(final Context context, final String dictName,
             final Locale locale, final String dictType, final File dictFile) {
-        super(dictType, locale);
+        super(dictType);
         mDictName = dictName;
         mContext = context;
+        mLocale = locale;
         mDictFile = getDictFile(context, dictName, dictFile);
         mBinaryDictionary = null;
         mIsReloading = new AtomicBoolean();
@@ -166,10 +163,32 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         asyncExecuteTaskWithLock(mLock.writeLock(), task);
     }
 
-    private static void asyncExecuteTaskWithLock(final Lock lock, final Runnable task) {
-        ExecutorUtils.getBackgroundExecutor(ExecutorUtils.KEYBOARD).execute(new Runnable() {
+    private void asyncExecuteTaskWithLock(final Lock lock, final Runnable task) {
+        asyncPreCheckAndExecuteTaskWithLock(lock, null /* preCheckTask */, task);
+    }
+
+    private void asyncPreCheckAndExecuteTaskWithWriteLock(
+            final Callable<Boolean> preCheckTask, final Runnable task) {
+        asyncPreCheckAndExecuteTaskWithLock(mLock.writeLock(), preCheckTask, task);
+
+    }
+
+    // Execute task with lock when the result of preCheckTask is true or preCheckTask is null.
+    private void asyncPreCheckAndExecuteTaskWithLock(final Lock lock,
+            final Callable<Boolean> preCheckTask, final Runnable task) {
+        ExecutorUtils.getExecutor(mDictName).execute(new Runnable() {
             @Override
             public void run() {
+                if (preCheckTask != null) {
+                    try {
+                        if (!preCheckTask.call().booleanValue()) {
+                            return;
+                        }
+                    } catch (final Exception e) {
+                        Log.e(TAG, "The pre check task throws an exception.", e);
+                        return;
+                    }
+                }
                 lock.lock();
                 try {
                     task.run();
@@ -180,18 +199,6 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         });
     }
 
-    @Nullable
-    BinaryDictionary getBinaryDictionary() {
-        return mBinaryDictionary;
-    }
-
-    void closeBinaryDictionary() {
-        if (mBinaryDictionary != null) {
-            mBinaryDictionary.close();
-            mBinaryDictionary = null;
-        }
-    }
-
     /**
      * Closes and cleans up the binary dictionary.
      */
@@ -200,7 +207,10 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                closeBinaryDictionary();
+                if (mBinaryDictionary != null) {
+                    mBinaryDictionary.close();
+                    mBinaryDictionary = null;
+                }
             }
         });
     }
@@ -214,6 +224,10 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         attributeMap.put(DictionaryHeader.DICTIONARY_LOCALE_KEY, mLocale.toString());
         attributeMap.put(DictionaryHeader.DICTIONARY_VERSION_KEY,
                 String.valueOf(TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis())));
+        attributeMap.put(DictionaryHeader.MAX_UNIGRAM_COUNT_KEY,
+                String.valueOf(DEFAULT_MAX_UNIGRAM_COUNT));
+        attributeMap.put(DictionaryHeader.MAX_BIGRAM_COUNT_KEY,
+                String.valueOf(DEFAULT_MAX_BIGRAM_COUNT));
         return attributeMap;
     }
 
@@ -226,11 +240,14 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         });
     }
 
-    void removeBinaryDictionaryLocked() {
-        closeBinaryDictionary();
+    private void removeBinaryDictionaryLocked() {
+        if (mBinaryDictionary != null) {
+            mBinaryDictionary.close();
+        }
         if (mDictFile.exists() && !FileUtils.deleteRecursively(mDictFile)) {
             Log.e(TAG, "Can't remove a file: " + mDictFile.getName());
         }
+        mBinaryDictionary = null;
     }
 
     private void openBinaryDictionaryLocked() {
@@ -239,7 +256,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
                 true /* useFullEditDistance */, mLocale, mDictType, true /* isUpdatable */);
     }
 
-    void createOnMemoryBinaryDictionaryLocked() {
+    private void createOnMemoryBinaryDictionaryLocked() {
         mBinaryDictionary = new BinaryDictionary(
                 mDictFile.getAbsolutePath(), true /* useFullEditDistance */, mLocale, mDictType,
                 DICTIONARY_FORMAT_VERSION, getHeaderAttributeMap());
@@ -258,11 +275,11 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     /**
      * Check whether GC is needed and run GC if required.
      */
-    public void runGCIfRequired(final boolean mindsBlockByGC) {
+    protected void runGCIfRequired(final boolean mindsBlockByGC) {
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                if (getBinaryDictionary() == null) {
+                if (mBinaryDictionary == null) {
                     return;
                 }
                 runGCIfRequiredLocked(mindsBlockByGC);
@@ -276,38 +293,40 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         }
     }
 
-    private void updateDictionaryWithWriteLock(@Nonnull final Runnable updateTask) {
-        reloadDictionaryIfRequired();
-        final Runnable task = new Runnable() {
-            @Override
-            public void run() {
-                if (getBinaryDictionary() == null) {
-                    return;
-                }
-                runGCIfRequiredLocked(true /* mindsBlockByGC */);
-                updateTask.run();
-            }
-        };
-        asyncExecuteTaskWithWriteLock(task);
-    }
-
     /**
      * Adds unigram information of a word to the dictionary. May overwrite an existing entry.
      */
-    public void addUnigramEntry(final String word, final int frequency,
-            final boolean isNotAWord, final boolean isPossiblyOffensive, final int timestamp) {
-        updateDictionaryWithWriteLock(new Runnable() {
-            @Override
-            public void run() {
-                addUnigramLocked(word, frequency, isNotAWord, isPossiblyOffensive, timestamp);
-            }
-        });
+    public void addUnigramEntryWithCheckingDistracter(final String word, final int frequency,
+            final String shortcutTarget, final int shortcutFreq, final boolean isNotAWord,
+            final boolean isBlacklisted, final int timestamp,
+            final DistracterFilter distracterFilter) {
+        reloadDictionaryIfRequired();
+        asyncPreCheckAndExecuteTaskWithWriteLock(
+                new Callable<Boolean>() {
+                    @Override
+                    public Boolean call() throws Exception {
+                        return !distracterFilter.isDistracterToWordsInDictionaries(
+                                PrevWordsInfo.EMPTY_PREV_WORDS_INFO, word, mLocale);
+                    }
+                },
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (mBinaryDictionary == null) {
+                            return;
+                        }
+                        runGCIfRequiredLocked(true /* mindsBlockByGC */);
+                        addUnigramLocked(word, frequency, shortcutTarget, shortcutFreq,
+                                isNotAWord, isBlacklisted, timestamp);
+                    }
+                });
     }
 
     protected void addUnigramLocked(final String word, final int frequency,
-            final boolean isNotAWord, final boolean isPossiblyOffensive, final int timestamp) {
-        if (!mBinaryDictionary.addUnigramEntry(word, frequency,
-                false /* isBeginningOfSentence */, isNotAWord, isPossiblyOffensive, timestamp)) {
+            final String shortcutTarget, final int shortcutFreq, final boolean isNotAWord,
+            final boolean isBlacklisted, final int timestamp) {
+        if (!mBinaryDictionary.addUnigramEntry(word, frequency, shortcutTarget, shortcutFreq,
+                false /* isBeginningOfSentence */, isNotAWord, isBlacklisted, timestamp)) {
             Log.e(TAG, "Cannot add unigram entry. word: " + word);
         }
     }
@@ -320,12 +339,11 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                if (binaryDictionary == null) {
+                if (mBinaryDictionary == null) {
                     return;
                 }
                 runGCIfRequiredLocked(true /* mindsBlockByGC */);
-                if (!binaryDictionary.removeUnigramEntry(word)) {
+                if (!mBinaryDictionary.removeUnigramEntry(word)) {
                     if (DEBUG) {
                         Log.i(TAG, "Cannot remove unigram entry: " + word);
                     }
@@ -337,85 +355,75 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     /**
      * Adds n-gram information of a word to the dictionary. May overwrite an existing entry.
      */
-    public void addNgramEntry(@Nonnull final NgramContext ngramContext, final String word,
+    public void addNgramEntry(final PrevWordsInfo prevWordsInfo, final String word,
             final int frequency, final int timestamp) {
         reloadDictionaryIfRequired();
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                if (getBinaryDictionary() == null) {
+                if (mBinaryDictionary == null) {
                     return;
                 }
                 runGCIfRequiredLocked(true /* mindsBlockByGC */);
-                addNgramEntryLocked(ngramContext, word, frequency, timestamp);
+                addNgramEntryLocked(prevWordsInfo, word, frequency, timestamp);
             }
         });
     }
 
-    protected void addNgramEntryLocked(@Nonnull final NgramContext ngramContext, final String word,
+    protected void addNgramEntryLocked(final PrevWordsInfo prevWordsInfo, final String word,
             final int frequency, final int timestamp) {
-        if (!mBinaryDictionary.addNgramEntry(ngramContext, word, frequency, timestamp)) {
+        if (!mBinaryDictionary.addNgramEntry(prevWordsInfo, word, frequency, timestamp)) {
             if (DEBUG) {
                 Log.i(TAG, "Cannot add n-gram entry.");
-                Log.i(TAG, "  NgramContext: " + ngramContext + ", word: " + word);
+                Log.i(TAG, "  PrevWordsInfo: " + prevWordsInfo + ", word: " + word);
             }
         }
     }
 
     /**
-     * Update dictionary for the word with the ngramContext.
+     * Dynamically remove the n-gram entry in the dictionary.
      */
-    public void updateEntriesForWord(@Nonnull final NgramContext ngramContext,
-            final String word, final boolean isValidWord, final int count, final int timestamp) {
-        updateDictionaryWithWriteLock(new Runnable() {
+    @UsedForTesting
+    public void removeNgramDynamically(final PrevWordsInfo prevWordsInfo, final String word) {
+        reloadDictionaryIfRequired();
+        asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                if (binaryDictionary == null) {
+                if (mBinaryDictionary == null) {
                     return;
                 }
-                if (!binaryDictionary.updateEntriesForWordWithNgramContext(ngramContext, word,
-                        isValidWord, count, timestamp)) {
+                runGCIfRequiredLocked(true /* mindsBlockByGC */);
+                if (!mBinaryDictionary.removeNgramEntry(prevWordsInfo, word)) {
                     if (DEBUG) {
-                        Log.e(TAG, "Cannot update counter. word: " + word
-                                + " context: " + ngramContext.toString());
+                        Log.i(TAG, "Cannot remove n-gram entry.");
+                        Log.i(TAG, "  PrevWordsInfo: " + prevWordsInfo + ", word: " + word);
                     }
                 }
             }
         });
     }
 
-    /**
-     * Used by Sketch.
-     * {@see https://cs.corp.google.com/#android/vendor/unbundled_google/packages/LatinIMEGoogle/tools/sketch/ime-simulator/src/com/android/inputmethod/sketch/imesimulator/ImeSimulator.java&q=updateEntriesForInputEventsCallback&l=286}
-     */
-    @UsedForTesting
-    public interface UpdateEntriesForInputEventsCallback {
+    public interface AddMultipleDictionaryEntriesCallback {
         public void onFinished();
     }
 
     /**
-     * Dynamically update entries according to input events.
-     *
-     * Used by Sketch.
-     * {@see https://cs.corp.google.com/#android/vendor/unbundled_google/packages/LatinIMEGoogle/tools/sketch/ime-simulator/src/com/android/inputmethod/sketch/imesimulator/ImeSimulator.java&q=updateEntriesForInputEventsCallback&l=286}
+     * Dynamically add multiple entries to the dictionary.
      */
-    @UsedForTesting
-    public void updateEntriesForInputEvents(
-            @Nonnull final ArrayList<WordInputEventForPersonalization> inputEvents,
-            final UpdateEntriesForInputEventsCallback callback) {
+    public void addMultipleDictionaryEntriesDynamically(
+            final ArrayList<LanguageModelParam> languageModelParams,
+            final AddMultipleDictionaryEntriesCallback callback) {
         reloadDictionaryIfRequired();
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
                 try {
-                    final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                    if (binaryDictionary == null) {
+                    if (mBinaryDictionary == null) {
                         return;
                     }
-                    binaryDictionary.updateEntriesForInputEvents(
-                            inputEvents.toArray(
-                                    new WordInputEventForPersonalization[inputEvents.size()]));
+                    mBinaryDictionary.addMultipleDictionaryEntries(
+                            languageModelParams.toArray(
+                                    new LanguageModelParam[languageModelParams.size()]));
                 } finally {
                     if (callback != null) {
                         callback.onFinished();
@@ -426,10 +434,10 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     }
 
     @Override
-    public ArrayList<SuggestedWordInfo> getSuggestions(final ComposedData composedData,
-            final NgramContext ngramContext, final long proximityInfoHandle,
+    public ArrayList<SuggestedWordInfo> getSuggestions(final WordComposer composer,
+            final PrevWordsInfo prevWordsInfo, final ProximityInfo proximityInfo,
             final SettingsValuesForSuggestion settingsValuesForSuggestion, final int sessionId,
-            final float weightForLocale, final float[] inOutWeightOfLangModelVsSpatialModel) {
+            final float[] inOutLanguageWeight) {
         reloadDictionaryIfRequired();
         boolean lockAcquired = false;
         try {
@@ -440,9 +448,8 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
                     return null;
                 }
                 final ArrayList<SuggestedWordInfo> suggestions =
-                        mBinaryDictionary.getSuggestions(composedData, ngramContext,
-                                proximityInfoHandle, settingsValuesForSuggestion, sessionId,
-                                weightForLocale, inOutWeightOfLangModelVsSpatialModel);
+                        mBinaryDictionary.getSuggestions(composer, prevWordsInfo, proximityInfo,
+                                settingsValuesForSuggestion, sessionId, inOutLanguageWeight);
                 if (mBinaryDictionary.isCorrupted()) {
                     Log.i(TAG, "Dictionary (" + mDictName +") is corrupted. "
                             + "Remove and regenerate it.");
@@ -512,11 +519,16 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     }
 
 
+    protected boolean isValidNgramLocked(final PrevWordsInfo prevWordsInfo, final String word) {
+        if (mBinaryDictionary == null) return false;
+        return mBinaryDictionary.isValidNgram(prevWordsInfo, word);
+    }
+
     /**
      * Loads the current binary dictionary from internal storage. Assumes the dictionary file
      * exists.
      */
-    void loadBinaryDictionaryLocked() {
+    private void loadBinaryDictionaryLocked() {
         if (DBG_STRESS_TEST) {
             // Test if this class does not cause problems when it takes long time to load binary
             // dictionary.
@@ -525,7 +537,6 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
                 Thread.sleep(15000);
                 Log.w(TAG, "End stress in loading");
             } catch (InterruptedException e) {
-                Log.w("Interrupted while loading: " + mDictName, e);
             }
         }
         final BinaryDictionary oldBinaryDictionary = mBinaryDictionary;
@@ -545,7 +556,7 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     /**
      * Create a new binary dictionary and load initial contents.
      */
-    void createNewDictionaryLocked() {
+    private void createNewDictionaryLocked() {
         removeBinaryDictionaryLocked();
         createOnMemoryBinaryDictionaryLocked();
         loadInitialContentsLocked();
@@ -559,14 +570,6 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
      */
     protected void setNeedsToRecreate() {
         mNeedsToRecreate = true;
-    }
-
-    void clearNeedsToRecreate() {
-        mNeedsToRecreate = false;
-    }
-
-    boolean isNeededToRecreate() {
-        return mNeedsToRecreate;
     }
 
     /**
@@ -590,40 +593,36 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
     /**
      * Reloads the dictionary. Access is controlled on a per dictionary file basis.
      */
-    private void asyncReloadDictionary() {
-        final AtomicBoolean isReloading = mIsReloading;
-        if (!isReloading.compareAndSet(false, true)) {
-            return;
-        }
-        final File dictFile = mDictFile;
-        asyncExecuteTaskWithWriteLock(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (!dictFile.exists() || isNeededToRecreate()) {
-                        // If the dictionary file does not exist or contents have been updated,
-                        // generate a new one.
-                        createNewDictionaryLocked();
-                    } else if (getBinaryDictionary() == null) {
-                        // Otherwise, load the existing dictionary.
-                        loadBinaryDictionaryLocked();
-                        final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                        if (binaryDictionary != null && !(isValidDictionaryLocked()
-                                // TODO: remove the check below
-                                && matchesExpectedBinaryDictFormatVersionForThisType(
-                                        binaryDictionary.getFormatVersion()))) {
-                            // Binary dictionary or its format version is not valid. Regenerate
-                            // the dictionary file. createNewDictionaryLocked will remove the
-                            // existing files if appropriate.
+    private final void asyncReloadDictionary() {
+        if (mIsReloading.compareAndSet(false, true)) {
+            asyncExecuteTaskWithWriteLock(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (!mDictFile.exists() || mNeedsToRecreate) {
+                            // If the dictionary file does not exist or contents have been updated,
+                            // generate a new one.
                             createNewDictionaryLocked();
+                        } else if (mBinaryDictionary == null) {
+                            // Otherwise, load the existing dictionary.
+                            loadBinaryDictionaryLocked();
+                            if (mBinaryDictionary != null && !(isValidDictionaryLocked()
+                                    // TODO: remove the check below
+                                    && matchesExpectedBinaryDictFormatVersionForThisType(
+                                            mBinaryDictionary.getFormatVersion()))) {
+                                // Binary dictionary or its format version is not valid. Regenerate
+                                // the dictionary file. createNewDictionaryLocked will remove the
+                                // existing files if appropriate.
+                                createNewDictionaryLocked();
+                            }
                         }
+                        mNeedsToRecreate = false;
+                    } finally {
+                        mIsReloading.set(false);
                     }
-                    clearNeedsToRecreate();
-                } finally {
-                    isReloading.set(false);
                 }
-            }
-        });
+            });
+        }
     }
 
     /**
@@ -633,38 +632,22 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
         asyncExecuteTaskWithWriteLock(new Runnable() {
             @Override
             public void run() {
-                final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                if (binaryDictionary == null) {
+                if (mBinaryDictionary == null) {
                     return;
                 }
-                if (binaryDictionary.needsToRunGC(false /* mindsBlockByGC */)) {
-                    binaryDictionary.flushWithGC();
+                if (mBinaryDictionary.needsToRunGC(false /* mindsBlockByGC */)) {
+                    mBinaryDictionary.flushWithGC();
                 } else {
-                    binaryDictionary.flush();
+                    mBinaryDictionary.flush();
                 }
             }
         });
-    }
-
-    public DictionaryStats getDictionaryStats() {
-        reloadDictionaryIfRequired();
-        final String dictName = mDictName;
-        final File dictFile = mDictFile;
-        final AsyncResultHolder<DictionaryStats> result =
-                new AsyncResultHolder<>("DictionaryStats");
-        asyncExecuteTaskWithLock(mLock.readLock(), new Runnable() {
-            @Override
-            public void run() {
-                result.set(new DictionaryStats(mLocale, dictName, dictName, dictFile, 0));
-            }
-        });
-        return result.get(null /* defaultValue */, TIMEOUT_FOR_READ_OPS_IN_MILLISECONDS);
     }
 
     @UsedForTesting
     public void waitAllTasksForTests() {
         final CountDownLatch countDownLatch = new CountDownLatch(1);
-        asyncExecuteTaskWithWriteLock(new Runnable() {
+        ExecutorUtils.getExecutor(mDictName).execute(new Runnable() {
             @Override
             public void run() {
                 countDownLatch.countDown();
@@ -686,72 +669,31 @@ abstract public class ExpandableBinaryDictionary extends Dictionary {
 
     public void dumpAllWordsForDebug() {
         reloadDictionaryIfRequired();
-        final String tag = TAG;
-        final String dictName = mDictName;
         asyncExecuteTaskWithLock(mLock.readLock(), new Runnable() {
             @Override
             public void run() {
-                Log.d(tag, "Dump dictionary: " + dictName + " for " + mLocale);
-                final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                if (binaryDictionary == null) {
-                    return;
-                }
+                Log.d(TAG, "Dump dictionary: " + mDictName);
                 try {
-                    final DictionaryHeader header = binaryDictionary.getHeader();
-                    Log.d(tag, "Format version: " + binaryDictionary.getFormatVersion());
-                    Log.d(tag, CombinedFormatUtils.formatAttributeMap(
+                    final DictionaryHeader header = mBinaryDictionary.getHeader();
+                    Log.d(TAG, "Format version: " + mBinaryDictionary.getFormatVersion());
+                    Log.d(TAG, CombinedFormatUtils.formatAttributeMap(
                             header.mDictionaryOptions.mAttributes));
                 } catch (final UnsupportedFormatException e) {
-                    Log.d(tag, "Cannot fetch header information.", e);
+                    Log.d(TAG, "Cannot fetch header information.", e);
                 }
                 int token = 0;
                 do {
                     final BinaryDictionary.GetNextWordPropertyResult result =
-                            binaryDictionary.getNextWordProperty(token);
+                            mBinaryDictionary.getNextWordProperty(token);
                     final WordProperty wordProperty = result.mWordProperty;
                     if (wordProperty == null) {
-                        Log.d(tag, " dictionary is empty.");
+                        Log.d(TAG, " dictionary is empty.");
                         break;
                     }
-                    Log.d(tag, wordProperty.toString());
+                    Log.d(TAG, wordProperty.toString());
                     token = result.mNextToken;
                 } while (token != 0);
             }
         });
-    }
-
-    /**
-     * Returns dictionary content required for syncing.
-     */
-    public WordProperty[] getWordPropertiesForSyncing() {
-        reloadDictionaryIfRequired();
-        final AsyncResultHolder<WordProperty[]> result =
-                new AsyncResultHolder<>("WordPropertiesForSync");
-        asyncExecuteTaskWithLock(mLock.readLock(), new Runnable() {
-            @Override
-            public void run() {
-                final ArrayList<WordProperty> wordPropertyList = new ArrayList<>();
-                final BinaryDictionary binaryDictionary = getBinaryDictionary();
-                if (binaryDictionary == null) {
-                    return;
-                }
-                int token = 0;
-                do {
-                    // TODO: We need a new API that returns *new* un-synced data.
-                    final BinaryDictionary.GetNextWordPropertyResult nextWordPropertyResult =
-                            binaryDictionary.getNextWordProperty(token);
-                    final WordProperty wordProperty = nextWordPropertyResult.mWordProperty;
-                    if (wordProperty == null) {
-                        break;
-                    }
-                    wordPropertyList.add(wordProperty);
-                    token = nextWordPropertyResult.mNextToken;
-                } while (token != 0);
-                result.set(wordPropertyList.toArray(new WordProperty[wordPropertyList.size()]));
-            }
-        });
-        // TODO: Figure out the best timeout duration for this API.
-        return result.get(DEFAULT_WORD_PROPERTIES_FOR_SYNC,
-                TIMEOUT_FOR_READ_OPS_IN_MILLISECONDS);
     }
 }

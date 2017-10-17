@@ -40,8 +40,11 @@ public final class ProbabilityInfo {
         if (probabilityInfo2 == null) {
             return probabilityInfo1;
         }
-        return (probabilityInfo1.mProbability > probabilityInfo2.mProbability) ? probabilityInfo1
-                : probabilityInfo2;
+        if (probabilityInfo1.mProbability > probabilityInfo2.mProbability) {
+            return probabilityInfo1;
+        } else {
+            return probabilityInfo2;
+        }
     }
 
     public ProbabilityInfo(final int probability) {
@@ -64,8 +67,9 @@ public final class ProbabilityInfo {
     public int hashCode() {
         if (hasHistoricalInfo()) {
             return Arrays.hashCode(new Object[] { mProbability, mTimestamp, mLevel, mCount });
+        } else {
+            return Arrays.hashCode(new Object[] { mProbability });
         }
-        return Arrays.hashCode(new Object[] { mProbability });
     }
 
     @Override

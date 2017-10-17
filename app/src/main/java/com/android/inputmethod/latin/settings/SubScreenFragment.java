@@ -20,7 +20,6 @@ import android.app.backup.BackupManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
-import android.content.res.Resources;
 import android.os.Bundle;
 import android.preference.ListPreference;
 import android.preference.Preference;
@@ -32,7 +31,7 @@ import android.util.Log;
  * A base abstract class for a {@link PreferenceFragment} that implements a nested
  * {@link PreferenceScreen} of the main preference screen.
  */
-public abstract class SubScreenFragment extends PreferenceFragment
+abstract class SubScreenFragment extends PreferenceFragment
         implements OnSharedPreferenceChangeListener {
     private OnSharedPreferenceChangeListener mSharedPreferenceChangeListener;
 
@@ -78,16 +77,6 @@ public abstract class SubScreenFragment extends PreferenceFragment
 
     final SharedPreferences getSharedPreferences() {
         return getPreferenceManager().getSharedPreferences();
-    }
-
-    /**
-     * Gets the application name to display on the UI.
-     */
-    final String getApplicationName() {
-        final Context context = getActivity();
-        final Resources res = getResources();
-        final int applicationLabelRes = context.getApplicationInfo().labelRes;
-        return res.getString(applicationLabelRes);
     }
 
     @Override

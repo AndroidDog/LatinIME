@@ -16,21 +16,16 @@
 
 package com.android.inputmethod.latin.spellcheck;
 
-import com.android.inputmethod.latin.permissions.PermissionsManager;
 import com.android.inputmethod.latin.utils.FragmentUtils;
 
-import android.annotation.TargetApi;
 import android.content.Intent;
-import android.os.Build;
 import android.os.Bundle;
 import android.preference.PreferenceActivity;
-import android.support.v4.app.ActivityCompat;
 
 /**
  * Spell checker preference screen.
  */
-public final class SpellCheckerSettingsActivity extends PreferenceActivity
-        implements ActivityCompat.OnRequestPermissionsResultCallback {
+public final class SpellCheckerSettingsActivity extends PreferenceActivity {
     private static final String DEFAULT_FRAGMENT = SpellCheckerSettingsFragment.class.getName();
 
     @Override
@@ -46,16 +41,9 @@ public final class SpellCheckerSettingsActivity extends PreferenceActivity
         return modIntent;
     }
 
-    @TargetApi(Build.VERSION_CODES.KITKAT)
-    @Override
+    // TODO: Uncomment the override annotation once we start using SDK version 19.
+    // @Override
     public boolean isValidFragment(String fragmentName) {
         return FragmentUtils.isValidFragment(fragmentName);
-    }
-
-    @Override
-    public void onRequestPermissionsResult(
-            int requestCode, String[] permissions, int[] grantResults) {
-        PermissionsManager.get(this).onRequestPermissionsResult(
-                requestCode, permissions, grantResults);
     }
 }

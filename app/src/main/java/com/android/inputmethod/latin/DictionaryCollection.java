@@ -18,14 +18,13 @@ package com.android.inputmethod.latin;
 
 import android.util.Log;
 
+import com.android.inputmethod.keyboard.ProximityInfo;
 import com.android.inputmethod.latin.SuggestedWords.SuggestedWordInfo;
-import com.android.inputmethod.latin.common.ComposedData;
 import com.android.inputmethod.latin.settings.SettingsValuesForSuggestion;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -35,14 +34,13 @@ public final class DictionaryCollection extends Dictionary {
     private final String TAG = DictionaryCollection.class.getSimpleName();
     protected final CopyOnWriteArrayList<Dictionary> mDictionaries;
 
-    public DictionaryCollection(final String dictType, final Locale locale) {
-        super(dictType, locale);
+    public DictionaryCollection(final String dictType) {
+        super(dictType);
         mDictionaries = new CopyOnWriteArrayList<>();
     }
 
-    public DictionaryCollection(final String dictType, final Locale locale,
-            final Dictionary... dictionaries) {
-        super(dictType, locale);
+    public DictionaryCollection(final String dictType, final Dictionary... dictionaries) {
+        super(dictType);
         if (null == dictionaries) {
             mDictionaries = new CopyOnWriteArrayList<>();
         } else {
@@ -51,32 +49,30 @@ public final class DictionaryCollection extends Dictionary {
         }
     }
 
-    public DictionaryCollection(final String dictType, final Locale locale,
-            final Collection<Dictionary> dictionaries) {
-        super(dictType, locale);
+    public DictionaryCollection(final String dictType, final Collection<Dictionary> dictionaries) {
+        super(dictType);
         mDictionaries = new CopyOnWriteArrayList<>(dictionaries);
         mDictionaries.removeAll(Collections.singleton(null));
     }
 
     @Override
-    public ArrayList<SuggestedWordInfo> getSuggestions(final ComposedData composedData,
-            final NgramContext ngramContext, final long proximityInfoHandle,
+    public ArrayList<SuggestedWordInfo> getSuggestions(final WordComposer composer,
+            final PrevWordsInfo prevWordsInfo, final ProximityInfo proximityInfo,
             final SettingsValuesForSuggestion settingsValuesForSuggestion,
-            final int sessionId, final float weightForLocale,
-            final float[] inOutWeightOfLangModelVsSpatialModel) {
+            final int sessionId, final float[] inOutLanguageWeight) {
         final CopyOnWriteArrayList<Dictionary> dictionaries = mDictionaries;
         if (dictionaries.isEmpty()) return null;
         // To avoid creating unnecessary objects, we get the list out of the first
         // dictionary and add the rest to it if not null, hence the get(0)
-        ArrayList<SuggestedWordInfo> suggestions = dictionaries.get(0).getSuggestions(composedData,
-                ngramContext, proximityInfoHandle, settingsValuesForSuggestion, sessionId,
-                weightForLocale, inOutWeightOfLangModelVsSpatialModel);
+        ArrayList<SuggestedWordInfo> suggestions = dictionaries.get(0).getSuggestions(composer,
+                prevWordsInfo, proximityInfo, settingsValuesForSuggestion, sessionId,
+                inOutLanguageWeight);
         if (null == suggestions) suggestions = new ArrayList<>();
         final int length = dictionaries.size();
         for (int i = 1; i < length; ++ i) {
-            final ArrayList<SuggestedWordInfo> sugg = dictionaries.get(i).getSuggestions(
-                    composedData, ngramContext, proximityInfoHandle, settingsValuesForSuggestion,
-                    sessionId, weightForLocale, inOutWeightOfLangModelVsSpatialModel);
+            final ArrayList<SuggestedWordInfo> sugg = dictionaries.get(i).getSuggestions(composer,
+                    prevWordsInfo, proximityInfo, settingsValuesForSuggestion, sessionId,
+                    inOutLanguageWeight);
             if (null != sugg) suggestions.addAll(sugg);
         }
         return suggestions;

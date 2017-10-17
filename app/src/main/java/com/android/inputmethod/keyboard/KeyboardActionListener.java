@@ -16,8 +16,8 @@
 
 package com.android.inputmethod.keyboard;
 
-import com.android.inputmethod.latin.common.Constants;
-import com.android.inputmethod.latin.common.InputPointers;
+import com.android.inputmethod.latin.Constants;
+import com.android.inputmethod.latin.InputPointers;
 
 public interface KeyboardActionListener {
     /**

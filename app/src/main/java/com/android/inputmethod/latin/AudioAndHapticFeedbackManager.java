@@ -22,7 +22,6 @@ import android.os.Vibrator;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 
-import com.android.inputmethod.latin.common.Constants;
 import com.android.inputmethod.latin.settings.SettingsValues;
 
 /**

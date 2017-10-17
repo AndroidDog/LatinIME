@@ -41,11 +41,13 @@
         android:summary="@string/prefs_block_potentially_offensive_summary"
         android:defaultValue="@bool/config_block_potentially_offensive"
         android:persistent="true" />
-    <CheckBoxPreference
-        android:key="pref_key_auto_correction"
+    <ListPreference
+        android:key="auto_correction_threshold"
         android:title="@string/auto_correction"
         android:summary="@string/auto_correction_summary"
-        android:defaultValue="true"
+        android:entryValues="@array/auto_correction_threshold_mode_indexes"
+        android:entries="@array/auto_correction_threshold_modes"
+        android:defaultValue="@string/auto_correction_threshold_mode_index_modest"
         android:persistent="true" />
     <CheckBoxPreference
         android:key="show_suggestions"

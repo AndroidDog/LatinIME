@@ -21,46 +21,53 @@ import android.content.res.Resources;
 import android.text.TextUtils;
 
 import com.android.inputmethod.annotations.UsedForTesting;
-import com.android.inputmethod.latin.common.Constants;
+import com.android.inputmethod.latin.Constants;
 import com.android.inputmethod.latin.utils.RunInLocale;
 import com.android.inputmethod.latin.utils.SubtypeLocaleUtils;
 
+import java.util.HashMap;
 import java.util.Locale;
 
-// TODO: Make this an immutable class.
 public final class KeyboardTextsSet {
     public static final String PREFIX_TEXT = "!text/";
-    private static final String PREFIX_RESOURCE = "!string/";
     public static final String SWITCH_TO_ALPHA_KEY_LABEL = "keylabel_to_alpha";
 
     private static final char BACKSLASH = Constants.CODE_BACKSLASH;
-    private static final int MAX_REFERENCE_INDIRECTION = 10;
+    private static final int MAX_STRING_REFERENCE_INDIRECTION = 10;
 
-    private Resources mResources;
-    private Locale mResourceLocale;
-    private String mResourcePackageName;
     private String[] mTextsTable;
+    // Resource name to text map.
+    private HashMap<String, String> mResourceNameToTextsMap = new HashMap<>();
 
     public void setLocale(final Locale locale, final Context context) {
+        mTextsTable = KeyboardTextsTable.getTextsTable(locale);
         final Resources res = context.getResources();
+        final int referenceId = context.getApplicationInfo().labelRes;
+        final String resourcePackageName = res.getResourcePackageName(referenceId);
+        final RunInLocale<Void> job = new RunInLocale<Void>() {
+            @Override
+            protected Void job(final Resources resource) {
+                loadStringResourcesInternal(res, RESOURCE_NAMES, resourcePackageName);
+                return null;
+            }
+        };
         // Null means the current system locale.
-        final String resourcePackageName = res.getResourcePackageName(
-                context.getApplicationInfo().labelRes);
-        setLocale(locale, res, resourcePackageName);
+        job.runInLocale(res,
+                SubtypeLocaleUtils.NO_LANGUAGE.equals(locale.toString()) ? null : locale);
     }
 
     @UsedForTesting
-    public void setLocale(final Locale locale, final Resources res,
+    void loadStringResourcesInternal(final Resources res, final String[] resourceNames,
             final String resourcePackageName) {
-        mResources = res;
-        // Null means the current system locale.
-        mResourceLocale = SubtypeLocaleUtils.NO_LANGUAGE.equals(locale.toString()) ? null : locale;
-        mResourcePackageName = resourcePackageName;
-        mTextsTable = KeyboardTextsTable.getTextsTable(locale);
+        for (final String resName : resourceNames) {
+            final int resId = res.getIdentifier(resName, "string", resourcePackageName);
+            mResourceNameToTextsMap.put(resName, res.getString(resId));
+        }
     }
 
     public String getText(final String name) {
-        return KeyboardTextsTable.getText(name, mTextsTable);
+        final String text = mResourceNameToTextsMap.get(name);
+        return (text != null) ? text : KeyboardTextsTable.getText(name, mTextsTable);
     }
 
     private static int searchTextNameEnd(final String text, final int start) {
@@ -86,14 +93,13 @@ public final class KeyboardTextsSet {
         StringBuilder sb;
         do {
             level++;
-            if (level >= MAX_REFERENCE_INDIRECTION) {
-                throw new RuntimeException("Too many " + PREFIX_TEXT + " or " + PREFIX_RESOURCE +
-                        " reference indirection: " + text);
+            if (level >= MAX_STRING_REFERENCE_INDIRECTION) {
+                throw new RuntimeException("Too many " + PREFIX_TEXT + "name indirection: " + text);
             }
 
-            final int prefixLength = PREFIX_TEXT.length();
+            final int prefixLen = PREFIX_TEXT.length();
             final int size = text.length();
-            if (size < prefixLength) {
+            if (size < prefixLen) {
                 break;
             }
 
@@ -104,12 +110,10 @@ public final class KeyboardTextsSet {
                     if (sb == null) {
                         sb = new StringBuilder(text.substring(0, pos));
                     }
-                    pos = expandReference(text, pos, PREFIX_TEXT, sb);
-                } else if (text.startsWith(PREFIX_RESOURCE, pos)) {
-                    if (sb == null) {
-                        sb = new StringBuilder(text.substring(0, pos));
-                    }
-                    pos = expandReference(text, pos, PREFIX_RESOURCE, sb);
+                    final int end = searchTextNameEnd(text, pos + prefixLen);
+                    final String name = text.substring(pos + prefixLen, end);
+                    sb.append(getText(name));
+                    pos = end - 1;
                 } else if (c == BACKSLASH) {
                     if (sb != null) {
                         // Append both escape character and escaped character.
@@ -128,24 +132,18 @@ public final class KeyboardTextsSet {
         return TextUtils.isEmpty(text) ? null : text;
     }
 
-    private int expandReference(final String text, final int pos, final String prefix,
-            final StringBuilder sb) {
-        final int prefixLength = prefix.length();
-        final int end = searchTextNameEnd(text, pos + prefixLength);
-        final String name = text.substring(pos + prefixLength, end);
-        if (prefix.equals(PREFIX_TEXT)) {
-            sb.append(getText(name));
-        } else { // PREFIX_RESOURCE
-            final String resourcePackageName = mResourcePackageName;
-            final RunInLocale<String> getTextJob = new RunInLocale<String>() {
-                @Override
-                protected String job(final Resources res) {
-                    final int resId = res.getIdentifier(name, "string", resourcePackageName);
-                    return res.getString(resId);
-                }
-            };
-            sb.append(getTextJob.runInLocale(mResources, mResourceLocale));
-        }
-        return end - 1;
-    }
+    // These texts' name should be aligned with the @string/<name> in
+    // values*/strings-action-keys.xml.
+    static final String[] RESOURCE_NAMES = {
+        // Labels for action.
+        "label_go_key",
+        "label_send_key",
+        "label_next_key",
+        "label_done_key",
+        "label_search_key",
+        "label_previous_key",
+        // Other labels.
+        "label_pause_key",
+        "label_wait_key",
+    };
 }

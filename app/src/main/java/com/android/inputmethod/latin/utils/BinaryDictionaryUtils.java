@@ -18,9 +18,9 @@ package com.android.inputmethod.latin.utils;
 
 import com.android.inputmethod.annotations.UsedForTesting;
 import com.android.inputmethod.latin.BinaryDictionary;
-import com.android.inputmethod.latin.common.StringUtils;
 import com.android.inputmethod.latin.makedict.DictionaryHeader;
 import com.android.inputmethod.latin.makedict.UnsupportedFormatException;
+import com.android.inputmethod.latin.personalization.PersonalizationHelper;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,10 +40,10 @@ public final class BinaryDictionaryUtils {
         JniUtils.loadNativeLibrary();
     }
 
-    @UsedForTesting
     private static native boolean createEmptyDictFileNative(String filePath, long dictVersion,
             String locale, String[] attributeKeyStringArray, String[] attributeValueStringArray);
     private static native float calcNormalizedScoreNative(int[] before, int[] after, int score);
+    private static native int editDistanceNative(int[] before, int[] after);
     private static native int setCurrentTimeForTestNative(int currentTime);
 
     public static DictionaryHeader getHeader(final File dictFile)
@@ -112,6 +112,14 @@ public final class BinaryDictionaryUtils {
                 StringUtils.toCodePointArray(after), score);
     }
 
+    public static int editDistance(final String before, final String after) {
+        if (before == null || after == null) {
+            throw new IllegalArgumentException();
+        }
+        return editDistanceNative(StringUtils.toCodePointArray(before),
+                StringUtils.toCodePointArray(after));
+    }
+
     /**
      * Control the current time to be used in the native code. If currentTime >= 0, this method sets
      * the current time and gets into test mode.
@@ -123,6 +131,8 @@ public final class BinaryDictionaryUtils {
      */
     @UsedForTesting
     public static int setCurrentTimeForTest(final int currentTime) {
-        return setCurrentTimeForTestNative(currentTime);
+        final int currentNativeTimestamp = setCurrentTimeForTestNative(currentTime);
+        PersonalizationHelper.currentTimeChangedForTesting(currentNativeTimestamp);
+        return currentNativeTimestamp;
     }
 }

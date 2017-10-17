@@ -16,17 +16,11 @@
 
 package com.android.inputmethod.latin;
 
-import com.android.inputmethod.annotations.UsedForTesting;
 import com.android.inputmethod.event.CombinerChain;
 import com.android.inputmethod.event.Event;
-import com.android.inputmethod.latin.SuggestedWords.SuggestedWordInfo;
-import com.android.inputmethod.latin.common.ComposedData;
-import com.android.inputmethod.latin.common.Constants;
-import com.android.inputmethod.latin.common.CoordinateUtils;
-import com.android.inputmethod.latin.common.InputPointers;
-import com.android.inputmethod.latin.common.StringUtils;
 import com.android.inputmethod.latin.define.DebugFlags;
-import com.android.inputmethod.latin.define.DecoderSpecificConstants;
+import com.android.inputmethod.latin.utils.CoordinateUtils;
+import com.android.inputmethod.latin.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,7 +31,7 @@ import javax.annotation.Nonnull;
  * A place to store the currently composing word with information such as adjacent key codes as well
  */
 public final class WordComposer {
-    private static final int MAX_WORD_LENGTH = DecoderSpecificConstants.DICTIONARY_MAX_WORD_LENGTH;
+    private static final int MAX_WORD_LENGTH = Constants.DICTIONARY_MAX_WORD_LENGTH;
     private static final boolean DBG = DebugFlags.DEBUG_ENABLED;
 
     public static final int CAPS_MODE_OFF = 0;
@@ -54,7 +48,7 @@ public final class WordComposer {
     // The list of events that served to compose this string.
     private final ArrayList<Event> mEvents;
     private final InputPointers mInputPointers = new InputPointers(MAX_WORD_LENGTH);
-    private SuggestedWordInfo mAutoCorrection;
+    private String mAutoCorrection;
     private boolean mIsResumed;
     private boolean mIsBatchMode;
     // A memory of the last rejected batch mode suggestion, if any. This goes like this: the user
@@ -93,10 +87,6 @@ public final class WordComposer {
         refreshTypedWordCache();
     }
 
-    public ComposedData getComposedDataSnapshot() {
-        return new ComposedData(getInputPointers(), isBatchMode(), mTypedWordCache.toString());
-    }
-
     /**
      * Restart the combiners, possibly with a new spec.
      * @param combiningSpec The spec string for combining. This is found in the extra value.
@@ -105,7 +95,8 @@ public final class WordComposer {
         final String nonNullCombiningSpec = null == combiningSpec ? "" : combiningSpec;
         if (!nonNullCombiningSpec.equals(mCombiningSpec)) {
             mCombinerChain = new CombinerChain(
-                    mCombinerChain.getComposingWordWithCombiningFeedback().toString());
+                    mCombinerChain.getComposingWordWithCombiningFeedback().toString(),
+                    CombinerChain.createCombiners(nonNullCombiningSpec));
             mCombiningSpec = nonNullCombiningSpec;
         }
     }
@@ -136,8 +127,41 @@ public final class WordComposer {
      * Number of keystrokes in the composing word.
      * @return the number of keystrokes
      */
-    public int size() {
+    // This may be made public if need be, but right now it's not used anywhere
+    /* package for tests */ int size() {
         return mCodePointSize;
+    }
+
+    /**
+     * Copy the code points in the typed word to a destination array of ints.
+     *
+     * If the array is too small to hold the code points in the typed word, nothing is copied and
+     * -1 is returned.
+     *
+     * @param destination the array of ints.
+     * @return the number of copied code points.
+     */
+    public int copyCodePointsExceptTrailingSingleQuotesAndReturnCodePointCount(
+            final int[] destination) {
+        // This method can be called on a separate thread and mTypedWordCache can change while we
+        // are executing this method.
+        final String typedWord = mTypedWordCache.toString();
+        // lastIndex is exclusive
+        final int lastIndex = typedWord.length()
+                - StringUtils.getTrailingSingleQuotesCount(typedWord);
+        if (lastIndex <= 0) {
+            // The string is empty or contains only single quotes.
+            return 0;
+        }
+
+        // The following function counts the number of code points in the text range which begins
+        // at index 0 and extends to the character at lastIndex.
+        final int codePointSize = Character.codePointCount(typedWord, 0, lastIndex);
+        if (codePointSize > destination.length) {
+            return -1;
+        }
+        return StringUtils.copyCodePointsAndReturnCodePointCount(destination, typedWord, 0,
+                lastIndex, true /* downCase */);
     }
 
     public boolean isSingleLetter() {
@@ -158,7 +182,7 @@ public final class WordComposer {
      * @return the processed event. Never null, but may be marked as consumed.
      */
     @Nonnull
-    public Event processEvent(@Nonnull final Event event) {
+    public Event processEvent(final Event event) {
         final Event processedEvent = mCombinerChain.processEvent(mEvents, event);
         // The retained state of the combiner chain may have changed while processing the event,
         // so we need to update our cache.
@@ -232,33 +256,31 @@ public final class WordComposer {
      * @return true if the cursor is still inside the composing word, false otherwise.
      */
     public boolean moveCursorByAndReturnIfInsideComposingWord(final int expectedMoveAmount) {
-        int actualMoveAmount = 0;
+        // TODO: should uncommit the composing feedback
+        mCombinerChain.reset();
+        int actualMoveAmountWithinWord = 0;
         int cursorPos = mCursorPositionWithinWord;
         // TODO: Don't make that copy. We can do this directly from mTypedWordCache.
         final int[] codePoints = StringUtils.toCodePointArray(mTypedWordCache);
         if (expectedMoveAmount >= 0) {
             // Moving the cursor forward for the expected amount or until the end of the word has
             // been reached, whichever comes first.
-            while (actualMoveAmount < expectedMoveAmount && cursorPos < codePoints.length) {
-                actualMoveAmount += Character.charCount(codePoints[cursorPos]);
+            while (actualMoveAmountWithinWord < expectedMoveAmount && cursorPos < mCodePointSize) {
+                actualMoveAmountWithinWord += Character.charCount(codePoints[cursorPos]);
                 ++cursorPos;
             }
         } else {
             // Moving the cursor backward for the expected amount or until the start of the word
             // has been reached, whichever comes first.
-            while (actualMoveAmount > expectedMoveAmount && cursorPos > 0) {
+            while (actualMoveAmountWithinWord > expectedMoveAmount && cursorPos > 0) {
                 --cursorPos;
-                actualMoveAmount -= Character.charCount(codePoints[cursorPos]);
+                actualMoveAmountWithinWord -= Character.charCount(codePoints[cursorPos]);
             }
         }
         // If the actual and expected amounts differ, we crossed the start or the end of the word
         // so the result would not be inside the composing word.
-        if (actualMoveAmount != expectedMoveAmount) {
-            return false;
-        }
+        if (actualMoveAmountWithinWord != expectedMoveAmount) return false;
         mCursorPositionWithinWord = cursorPos;
-        mCombinerChain.applyProcessedEvent(mCombinerChain.processEvent(
-                mEvents, Event.createCursorMovedEvent(cursorPos)));
         return true;
     }
 
@@ -331,8 +353,9 @@ public final class WordComposer {
         if (size() <= 1) {
             return mCapitalizedMode == CAPS_MODE_AUTO_SHIFT_LOCKED
                     || mCapitalizedMode == CAPS_MODE_MANUAL_SHIFT_LOCKED;
+        } else {
+            return mCapsCount == size();
         }
-        return mCapsCount == size();
     }
 
     public boolean wasShiftedNoLock() {
@@ -395,14 +418,14 @@ public final class WordComposer {
     /**
      * Sets the auto-correction for this word.
      */
-    public void setAutoCorrection(final SuggestedWordInfo autoCorrection) {
-        mAutoCorrection = autoCorrection;
+    public void setAutoCorrection(final String correction) {
+        mAutoCorrection = correction;
     }
 
     /**
      * @return the auto-correction for this word, or null if none.
      */
-    public SuggestedWordInfo getAutoCorrectionOrNull() {
+    public String getAutoCorrectionOrNull() {
         return mAutoCorrection;
     }
 
@@ -416,13 +439,13 @@ public final class WordComposer {
     // `type' should be one of the LastComposedWord.COMMIT_TYPE_* constants above.
     // committedWord should contain suggestion spans if applicable.
     public LastComposedWord commitWord(final int type, final CharSequence committedWord,
-            final String separatorString, final NgramContext ngramContext) {
+            final String separatorString, final PrevWordsInfo prevWordsInfo) {
         // Note: currently, we come here whenever we commit a word. If it's a MANUAL_PICK
         // or a DECIDED_WORD we may cancel the commit later; otherwise, we should deactivate
         // the last composed word to ensure this does not happen.
         final LastComposedWord lastComposedWord = new LastComposedWord(mEvents,
                 mInputPointers, mTypedWordCache.toString(), committedWord, separatorString,
-                ngramContext, mCapitalizedMode);
+                prevWordsInfo, mCapitalizedMode);
         mInputPointers.reset();
         if (type != LastComposedWord.COMMIT_TYPE_DECIDED_WORD
                 && type != LastComposedWord.COMMIT_TYPE_MANUAL_PICK) {
@@ -467,15 +490,5 @@ public final class WordComposer {
 
     public String getRejectedBatchModeSuggestion() {
         return mRejectedBatchModeSuggestion;
-    }
-
-    @UsedForTesting
-    void addInputPointerForTest(int index, int keyX, int keyY) {
-        mInputPointers.addPointerAt(index, keyX, keyY, 0, 0);
-    }
-
-    @UsedForTesting
-    void setTypedWordCacheForTests(String typedWordCacheForTests) {
-        mTypedWordCache = typedWordCacheForTests;
     }
 }

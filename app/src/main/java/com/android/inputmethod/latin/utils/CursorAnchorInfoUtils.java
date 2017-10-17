@@ -16,25 +16,16 @@
 
 package com.android.inputmethod.latin.utils;
 
-import android.annotation.TargetApi;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.inputmethodservice.ExtractEditText;
 import android.inputmethodservice.InputMethodService;
-import android.os.Build;
 import android.text.Layout;
 import android.text.Spannable;
-import android.text.Spanned;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.inputmethod.CursorAnchorInfo;
 import android.widget.TextView;
-
-import com.android.inputmethod.compat.BuildCompatUtils;
-import com.android.inputmethod.compat.CursorAnchorInfoCompatWrapper;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 /**
  * This class allows input methods to extract {@link CursorAnchorInfo} directly from the given
@@ -86,32 +77,13 @@ public final class CursorAnchorInfoUtils {
     }
 
     /**
-     * Extracts {@link CursorAnchorInfoCompatWrapper} from the given {@link TextView}.
-     * @param textView the target text view from which {@link CursorAnchorInfoCompatWrapper} is to
-     * be extracted.
-     * @return the {@link CursorAnchorInfoCompatWrapper} object based on the current layout.
-     * {@code null} if {@code Build.VERSION.SDK_INT} is 20 or prior or {@link TextView} is not
-     * ready to provide layout information.
-     */
-    @Nullable
-    public static CursorAnchorInfoCompatWrapper extractFromTextView(
-            @Nonnull final TextView textView) {
-        if (BuildCompatUtils.EFFECTIVE_SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return null;
-        }
-        return CursorAnchorInfoCompatWrapper.wrap(extractFromTextViewInternal(textView));
-    }
-
-    /**
      * Returns {@link CursorAnchorInfo} from the given {@link TextView}.
      * @param textView the target text view from which {@link CursorAnchorInfo} is to be extracted.
      * @return the {@link CursorAnchorInfo} object based on the current layout. {@code null} if it
      * is not feasible.
      */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    @Nullable
-    private static CursorAnchorInfo extractFromTextViewInternal(@Nonnull final TextView textView) {
-        final Layout layout = textView.getLayout();
+    public static CursorAnchorInfo getCursorAnchorInfo(final TextView textView) {
+        Layout layout = textView.getLayout();
         if (layout == null) {
             return null;
         }
@@ -150,7 +122,7 @@ public final class CursorAnchorInfoUtils {
             final Object[] spans = spannable.getSpans(0, text.length(), Object.class);
             for (Object span : spans) {
                 final int spanFlag = spannable.getSpanFlags(span);
-                if ((spanFlag & Spanned.SPAN_COMPOSING) != 0) {
+                if ((spanFlag & Spannable.SPAN_COMPOSING) != 0) {
                     composingTextStart = Math.min(composingTextStart,
                             spannable.getSpanStart(span));
                     composingTextEnd = Math.max(composingTextEnd, spannable.getSpanEnd(span));

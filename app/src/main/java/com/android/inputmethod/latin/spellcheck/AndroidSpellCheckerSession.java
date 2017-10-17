@@ -16,10 +16,8 @@
 
 package com.android.inputmethod.latin.spellcheck;
 
-import android.annotation.TargetApi;
 import android.content.res.Resources;
 import android.os.Binder;
-import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.textservice.SentenceSuggestionsInfo;
@@ -27,8 +25,8 @@ import android.view.textservice.SuggestionsInfo;
 import android.view.textservice.TextInfo;
 
 import com.android.inputmethod.compat.TextInfoCompatUtils;
-import com.android.inputmethod.latin.NgramContext;
-import com.android.inputmethod.latin.utils.SpannableStringUtils;
+import com.android.inputmethod.latin.PrevWordsInfo;
+import com.android.inputmethod.latin.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Locale;
@@ -44,7 +42,6 @@ public final class AndroidSpellCheckerSession extends AndroidWordLevelSpellCheck
         mResources = service.getResources();
     }
 
-    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
     private SentenceSuggestionsInfo fixWronglyInvalidatedWordWithSingleQuote(TextInfo ti,
             SentenceSuggestionsInfo ssi) {
         final CharSequence typedText = TextInfoCompatUtils.getCharSequenceOrString(ti);
@@ -65,16 +62,15 @@ public final class AndroidSpellCheckerSession extends AndroidWordLevelSpellCheck
             final int offset = ssi.getOffsetAt(i);
             final int length = ssi.getLengthAt(i);
             final CharSequence subText = typedText.subSequence(offset, offset + length);
-            final NgramContext ngramContext =
-                    new NgramContext(new NgramContext.WordInfo(currentWord));
+            final PrevWordsInfo prevWordsInfo =
+                    new PrevWordsInfo(new PrevWordsInfo.WordInfo(currentWord));
             currentWord = subText;
             if (!subText.toString().contains(AndroidSpellCheckerService.SINGLE_QUOTE)) {
                 continue;
             }
-            // Split preserving spans.
-            final CharSequence[] splitTexts = SpannableStringUtils.split(subText,
+            final CharSequence[] splitTexts = StringUtils.split(subText,
                     AndroidSpellCheckerService.SINGLE_QUOTE,
-                    true /* preserveTrailingEmptySegments */);
+                    true /* preserveTrailingEmptySegments */ );
             if (splitTexts == null || splitTexts.length <= 1) {
                 continue;
             }
@@ -84,7 +80,8 @@ public final class AndroidSpellCheckerSession extends AndroidWordLevelSpellCheck
                 if (TextUtils.isEmpty(splitText)) {
                     continue;
                 }
-                if (mSuggestionsCache.getSuggestionsFromCache(splitText.toString()) == null) {
+                if (mSuggestionsCache.getSuggestionsFromCache(splitText.toString(), prevWordsInfo)
+                        == null) {
                     continue;
                 }
                 final int newLength = splitText.length();
@@ -152,7 +149,7 @@ public final class AndroidSpellCheckerSession extends AndroidWordLevelSpellCheck
      * @param textInfos an array of the text metadata
      * @param suggestionsLimit the maximum number of suggestions to be returned
      * @return an array of {@link SentenceSuggestionsInfo} returned by
-     * {@link android.service.textservice.SpellCheckerService.Session#onGetSuggestions(TextInfo, int)}
+     * {@link SpellCheckerService.Session#onGetSuggestions(TextInfo, int)}
      */
     private SentenceSuggestionsInfo[] splitAndSuggest(TextInfo[] textInfos, int suggestionsLimit) {
         if (textInfos == null || textInfos.length == 0) {
@@ -211,10 +208,10 @@ public final class AndroidSpellCheckerSession extends AndroidWordLevelSpellCheck
                 } else {
                     prevWord = null;
                 }
-                final NgramContext ngramContext =
-                        new NgramContext(new NgramContext.WordInfo(prevWord));
+                final PrevWordsInfo prevWordsInfo =
+                        new PrevWordsInfo(new PrevWordsInfo.WordInfo(prevWord));
                 final TextInfo textInfo = textInfos[i];
-                retval[i] = onGetSuggestionsInternal(textInfo, ngramContext, suggestionsLimit);
+                retval[i] = onGetSuggestionsInternal(textInfo, prevWordsInfo, suggestionsLimit);
                 retval[i].setCookieAndSequence(textInfo.getCookie(), textInfo.getSequence());
             }
             return retval;

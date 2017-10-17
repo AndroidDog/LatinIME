@@ -176,4 +176,3 @@ public class UserDictionaryAddWordFragment extends Fragment
         getActivity().onBackPressed();
     }
 }
-

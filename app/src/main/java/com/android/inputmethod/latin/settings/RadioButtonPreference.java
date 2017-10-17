@@ -43,7 +43,9 @@ public class RadioButtonPreference extends Preference {
     private final View.OnClickListener mClickListener = new View.OnClickListener() {
         @Override
         public void onClick(final View v) {
-            callListenerOnRadioButtonClicked();
+            if (mListener != null) {
+                mListener.onRadioButtonClicked(RadioButtonPreference.this);
+            }
         }
     };
 
@@ -63,12 +65,6 @@ public class RadioButtonPreference extends Preference {
 
     public void setOnRadioButtonClickedListener(final OnRadioButtonClickedListener listener) {
         mListener = listener;
-    }
-
-    void callListenerOnRadioButtonClicked() {
-        if (mListener != null) {
-            mListener.onRadioButtonClicked(this);
-        }
     }
 
     @Override

@@ -42,14 +42,10 @@ import com.android.inputmethod.latin.utils.UncachedInputMethodManagerUtils;
 
 import java.util.ArrayList;
 
-import javax.annotation.Nonnull;
-
 // TODO: Use Fragment to implement welcome screen and setup steps.
 public final class SetupWizardActivity extends Activity implements View.OnClickListener {
     static final String TAG = SetupWizardActivity.class.getSimpleName();
 
-    // For debugging purpose.
-    private static final boolean FORCE_TO_SHOW_WELCOME_SCREEN = false;
     private static final boolean ENABLE_WELCOME_VIDEO = true;
 
     private InputMethodManager mImm;
@@ -84,7 +80,7 @@ public final class SetupWizardActivity extends Activity implements View.OnClickL
 
         private final InputMethodManager mImmInHandler;
 
-        public SettingsPoolingHandler(@Nonnull final SetupWizardActivity ownerInstance,
+        public SettingsPoolingHandler(final SetupWizardActivity ownerInstance,
                 final InputMethodManager imm) {
             super(ownerInstance);
             mImmInHandler = imm;
@@ -265,8 +261,6 @@ public final class SetupWizardActivity extends Activity implements View.OnClickL
         intent.setClass(this, SettingsActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        intent.putExtra(SettingsActivity.EXTRA_ENTRY_KEY,
-                SettingsActivity.EXTRA_ENTRY_VALUE_APP_ICON);
         startActivity(intent);
     }
 
@@ -310,9 +304,6 @@ public final class SetupWizardActivity extends Activity implements View.OnClickL
 
     private int determineSetupStepNumber() {
         mHandler.cancelPollingImeSettings();
-        if (FORCE_TO_SHOW_WELCOME_SCREEN) {
-            return STEP_1;
-        }
         if (!UncachedInputMethodManagerUtils.isThisImeEnabled(this, mImm)) {
             return STEP_1;
         }

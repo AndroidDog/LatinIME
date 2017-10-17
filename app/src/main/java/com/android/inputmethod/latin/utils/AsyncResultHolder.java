@@ -16,8 +16,6 @@
 
 package com.android.inputmethod.latin.utils;
 
-import android.util.Log;
-
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -31,11 +29,9 @@ public class AsyncResultHolder<E> {
     private final Object mLock = new Object();
 
     private E mResult;
-    private final String mTag;
     private final CountDownLatch mLatch;
 
-    public AsyncResultHolder(final String tag) {
-        mTag = tag;
+    public AsyncResultHolder() {
         mLatch = new CountDownLatch(1);
     }
 
@@ -63,9 +59,12 @@ public class AsyncResultHolder<E> {
      */
     public E get(final E defaultValue, final long timeOut) {
         try {
-            return mLatch.await(timeOut, TimeUnit.MILLISECONDS) ? mResult : defaultValue;
+            if (mLatch.await(timeOut, TimeUnit.MILLISECONDS)) {
+                return mResult;
+            } else {
+                return defaultValue;
+            }
         } catch (InterruptedException e) {
-            Log.w(mTag, "get() : Interrupted after " + timeOut + " ms");
             return defaultValue;
         }
     }

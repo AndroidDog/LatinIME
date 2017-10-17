@@ -16,8 +16,7 @@
 
 package com.android.inputmethod.latin;
 
-import com.android.inputmethod.latin.common.NativeSuggestOptions;
-import com.android.inputmethod.latin.define.DecoderSpecificConstants;
+import com.android.inputmethod.latin.settings.NativeSuggestOptions;
 import com.android.inputmethod.latin.utils.JniUtils;
 
 import java.util.Locale;
@@ -28,21 +27,20 @@ public final class DicTraverseSession {
     }
     // Must be equal to MAX_RESULTS in native/jni/src/defines.h
     private static final int MAX_RESULTS = 18;
-    public final int[] mInputCodePoints =
-            new int[DecoderSpecificConstants.DICTIONARY_MAX_WORD_LENGTH];
+    public final int[] mInputCodePoints = new int[Constants.DICTIONARY_MAX_WORD_LENGTH];
     public final int[][] mPrevWordCodePointArrays =
-            new int[DecoderSpecificConstants.MAX_PREV_WORD_COUNT_FOR_N_GRAM][];
+            new int[Constants.MAX_PREV_WORD_COUNT_FOR_N_GRAM][];
     public final boolean[] mIsBeginningOfSentenceArray =
-            new boolean[DecoderSpecificConstants.MAX_PREV_WORD_COUNT_FOR_N_GRAM];
+            new boolean[Constants.MAX_PREV_WORD_COUNT_FOR_N_GRAM];
     public final int[] mOutputSuggestionCount = new int[1];
     public final int[] mOutputCodePoints =
-            new int[DecoderSpecificConstants.DICTIONARY_MAX_WORD_LENGTH * MAX_RESULTS];
+            new int[Constants.DICTIONARY_MAX_WORD_LENGTH * MAX_RESULTS];
     public final int[] mSpaceIndices = new int[MAX_RESULTS];
     public final int[] mOutputScores = new int[MAX_RESULTS];
     public final int[] mOutputTypes = new int[MAX_RESULTS];
     // Only one result is ever used
     public final int[] mOutputAutoCommitFirstWordConfidence = new int[1];
-    public final float[] mInputOutputWeightOfLangModelVsSpatialModel = new float[1];
+    public final float[] mInputOutputLanguageWeight = new float[1];
 
     public final NativeSuggestOptions mNativeSuggestOptions = new NativeSuggestOptions();
 
@@ -72,7 +70,7 @@ public final class DicTraverseSession {
                 mNativeDicTraverseSession, dictionary, previousWord, previousWordLength);
     }
 
-    private static long createNativeDicTraverseSession(String locale, long dictSize) {
+    private final long createNativeDicTraverseSession(String locale, long dictSize) {
         return setDicTraverseSessionNative(locale, dictSize);
     }
 

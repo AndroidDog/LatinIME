@@ -19,10 +19,6 @@
 -->
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
-    <style
-        name="InputView.Holo"
-        parent="InputView"
-    />
     <!-- Holo KeyboardView theme (ICS and KLP) -->
     <style
         name="KeyboardView.Holo"

@@ -40,8 +40,6 @@ public final class MoreSuggestionsView extends MoreKeysKeyboardView {
         public abstract void onSuggestionSelected(final SuggestedWordInfo info);
     }
 
-    private boolean mIsInModalMode;
-
     public MoreSuggestionsView(final Context context, final AttributeSet attrs) {
         this(context, attrs, R.attr.moreKeysKeyboardViewStyle);
     }
@@ -55,7 +53,6 @@ public final class MoreSuggestionsView extends MoreKeysKeyboardView {
     @Override
     public void setKeyboard(final Keyboard keyboard) {
         super.setKeyboard(keyboard);
-        mIsInModalMode = false;
         // With accessibility mode off, {@link #mAccessibilityDelegate} is set to null at the
         // above {@link MoreKeysKeyboardView#setKeyboard(Keyboard)} call.
         // With accessibility mode on, {@link #mAccessibilityDelegate} is set to a
@@ -77,15 +74,10 @@ public final class MoreSuggestionsView extends MoreKeysKeyboardView {
         updateKeyDrawParams(keyHeight);
     }
 
-    public void setModalMode() {
-        mIsInModalMode = true;
+    public void adjustVerticalCorrectionForModalMode() {
         // Set vertical correction to zero (Reset more keys keyboard sliding allowance
         // {@link R#dimen.config_more_keys_keyboard_slide_allowance}).
         mKeyDetector.setKeyboard(getKeyboard(), -getPaddingLeft(), -getPaddingTop());
-    }
-
-    public boolean isInModalMode() {
-        return mIsInModalMode;
     }
 
     @Override
